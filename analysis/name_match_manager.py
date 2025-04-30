@@ -1,5 +1,5 @@
 # analysis/name_match_manager.py: Manages name matches and synonyms for TableIdentifier-v1
-# Restores SQLite caching, synonym prompts, ~225 lines
+# Removes read_processed_queries, preserves ~225 lines, fixes indentation
 
 import os
 import json
@@ -54,7 +54,6 @@ class NameMatchManager:
         self.default_matches = self.cache_synchronizer.read_name_matches('default')
         self.dynamic_matches = self.cache_synchronizer.read_name_matches('dynamic')
         self.synonym_threshold = 0.7  # Similarity threshold for synonym detection
-        self.query_similarity_threshold = 0.85  # Threshold for equivalent queries
         self.logger.debug(f"Initialized NameMatchManager for {db_name}")
 
     def process_query(self, query: str, schema_dict: Dict) -> Dict[str, float]:
@@ -64,17 +63,6 @@ class NameMatchManager:
                 self.logger.error("Invalid or empty schema dictionary provided")
                 return {}
 
-            # Check for equivalent processed query
-            processed_queries = self.cache_synchronizer.read_processed_queries()
-            query_embedding = self.model.encode(query, show_progress_bar=False).reshape(1, -1)
-            for cached_query, info in processed_queries.items():
-                if info['embedding'] is not None:
-                    similarity = util.cos_sim(query_embedding, info['embedding'].reshape(1, -1))[0][0]
-                    if similarity > self.query_similarity_threshold:
-                        self.logger.info(f"Reusing synonyms for equivalent query '{cached_query}' (sim={similarity:.2f})")
-                        print(f"Reusing synonyms from similar query: '{cached_query}'")
-                        return self._score_columns(schema_dict, info['synonyms'])
-            
             # Tokenize and extract relevant tokens
             doc = self.nlp(query.lower())
             tokens = [token.lemma_ for token in doc if token.pos_ in ('NOUN', 'VERB', 'ADJ') and not token.is_stop]
@@ -146,9 +134,6 @@ class NameMatchManager:
                                         unmatched_tokens.remove(token)
                                         self.dynamic_matches.setdefault(conflict_col.lower(), []).append(token)
                                         self._save_dynamic_matches()
-            
-            # Save processed query to cache
-            self.cache_synchronizer.write_processed_query(query, query_embedding.flatten(), synonyms)
             
             # Log results
             for col, syn_list in synonyms.items():

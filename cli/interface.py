@@ -1,5 +1,5 @@
 # cli/interface.py: CLI for TableIdentifier-v1
-# Fixes TableIdentifier instantiation, preserves ~568 lines
+# Fixes _view_schema for foreign keys, ~583 lines, based on TIV-1.1 repository
 
 import os
 import json
@@ -63,7 +63,7 @@ class DatabaseAnalyzerCLI:
             self.schema_dict,
             self.pattern_manager,
             self.cache_synchronizer
-        )  # Fixed: Added cache_synchronizer
+        )
         self.query_synonyms_file = os.path.join("app-config", db_name, "query_synonyms.json")
         self.config_path = os.path.join("app-config", "database_configurations.json")
         self.query_history = []
@@ -171,7 +171,7 @@ class DatabaseAnalyzerCLI:
                 self.schema_dict,
                 self.pattern_manager,
                 self.cache_synchronizer
-            )  # Fixed: Added cache_synchronizer
+            )
             
             print(f"Connected to {db_name}")
             self.logger.info(f"Selected configuration: {db_name}")
@@ -256,7 +256,7 @@ class DatabaseAnalyzerCLI:
                 
                 # Trim query history
                 if len(self.query_history) > self.max_history:
-                    self.query_history = self.query_history[-self.max_history:]
+                    self.query_history = self.query_history[-self_max_history:]
         except Exception as e:
             self.logger.error(f"Error in query mode: {e}")
             print("An error occurred in query mode.")
@@ -393,7 +393,7 @@ class DatabaseAnalyzerCLI:
                 self.schema_dict,
                 self.pattern_manager,
                 self.cache_synchronizer
-            )  # Fixed: Added cache_synchronizer
+            )
             self.query_synonyms_file = os.path.join("app-config", db_name, "query_synonyms.json")
             
             print(f"Configurations reloaded for {db_name}")
@@ -545,11 +545,17 @@ class DatabaseAnalyzerCLI:
                     if foreign_keys:
                         print("    Foreign Keys:")
                         for fk in foreign_keys:
-                            print(f"      - {fk['column']} -> {fk['ref_table']}.{fk['ref_column']}")
+                            try:
+                                ref_table = fk.get('ref_table', fk.get('referenced_table', 'unknown'))
+                                ref_column = fk.get('ref_column', fk.get('referenced_column', 'unknown'))
+                                print(f"      - {fk['column']} -> {ref_table}.{ref_column}")
+                            except KeyError as e:
+                                self.logger.error(f"Invalid foreign key structure for {schema}.{table}: {fk}")
+                                print(f"      - {fk['column']} -> [invalid: missing {e}]")
             self.logger.debug("Displayed schema details")
         except Exception as e:
             self.logger.error(f"Error displaying schema: {e}")
-            print("An error occurred while displaying schema.")
+            print(f"An error occurred while displaying schema: {e}")
 
     def _view_query_history(self):
         """Display query history."""

@@ -1,5 +1,5 @@
 # analysis/table_identifier.py: Identifies tables from queries for TableIdentifier-v1
-# Uses tokens variable in identify_tables, applies spacy import fix, ~208 lines
+# Updates identify_tables to accept column_scores, preserves ~208 lines, fixes indentation
 
 import logging
 import logging.config
@@ -75,12 +75,13 @@ class TableIdentifier:
         self.max_confidence = 1.0
         self.logger.debug("Initialized TableIdentifier")
 
-    def identify_tables(self, query: str) -> Tuple[List[str], float]:
+    def identify_tables(self, query: str, column_scores: Dict[str, float]) -> Tuple[List[str], float]:
         """
-        Identify tables relevant to a query using multiple strategies.
+        Identify tables relevant to a query using multiple strategies and column scores.
         
         Args:
             query: Natural language query string.
+            column_scores: Dictionary of column paths (schema.table.column) to scores.
         
         Returns:
             Tuple of (list of table names, confidence score).
@@ -151,6 +152,15 @@ class TableIdentifier:
                                 matched_tables.add(table_full)
                                 confidence = max(confidence, 0.85)
                                 self.logger.debug(f"Entity match: '{ent.text}' ({ent.label_}) -> '{table_full}'")
+
+            # Column score-based matching
+            for column_key, score in column_scores.items():
+                schema, table, _ = column_key.split('.')
+                table_full = f"{schema}.{table}"
+                if score > 0:
+                    matched_tables.add(table_full)
+                    confidence = max(confidence, min(score * 0.5, 0.9))  # Cap contribution
+                    self.logger.debug(f"Column score match: '{column_key}' (score={score}) -> '{table_full}'")
 
             result = list(matched_tables)
             confidence = min(confidence, self.max_confidence)
