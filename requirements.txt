@@ -1,0 +1,6 @@
+sentence-transformers
+portalocker
+langdetect
+numpy
+spacy
+pyodbc

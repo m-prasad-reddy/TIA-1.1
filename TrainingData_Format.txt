@@ -1,0 +1,6 @@
+DB_CONFIG,DB_NAME,USER_QUERY,RELATED_TABLES,SPECIFIC_COLUMNS
+"SQL SERVER","BIKESTORES","how many orders were delivered in 2016","sales.orders","order_id"
+"SQL SERVER","BIKESTORES","orders processed between Jan-15-2016 and Jan-14-2017","sales.orders","order_id"
+"SQL SERVER","BIKESTORES","how many employees works for all stores","sales.staffs,sales.stores","staff_id,store_id"
+"SQL SERVER","BIKESTORES","how much staff works for all stores","sales.staffs,sales.stores","staff_id,store_id"
+"SQL SERVER","BIKESTORES","list all products by categories and brand names","production.categories,production.brands,production.products",""

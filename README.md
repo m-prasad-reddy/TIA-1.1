@@ -1,2 +1,2 @@
 # TIV-1.1
-Table Identifier 1.1 with metadata analysis
+Table Identifier - Generate and Load Patterns for connected schema
