@@ -1,5 +1,5 @@
 # config/cache_synchronizer.py: Manages cache operations for TableIdentifier-v1
-# Adds query validation, handles None embeddings, preserves ~512 lines
+# Fixes write_ignored_query for np.ndarray embeddings, preserves ~512 lines
 
 import os
 import sqlite3
@@ -302,9 +302,13 @@ class CacheSynchronizer:
                 self.cursor.execute("SELECT timestamp, query, tables, embedding, count FROM feedback")
             feedback = []
             for timestamp, query, tables_json, embedding_blob, count in self.cursor.fetchall():
-                tables = json.loads(tables_json)
-                embedding = self._blob_to_embedding(embedding_blob) if embedding_blob else np.zeros(384, dtype=np.float32)
-                feedback.append((timestamp, query, tables, embedding, count))
+                try:
+                    tables = json.loads(tables_json)
+                    embedding = self._blob_to_embedding(embedding_blob) if embedding_blob else np.zeros(384, dtype=np.float32)
+                    feedback.append((timestamp, query, tables, embedding, count))
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"Error decoding tables JSON for query '{query}': {e}")
+                    continue
             self.logger.debug(f"Retrieved {len(feedback)} feedback entries")
             return feedback
         except Exception as e:
@@ -367,7 +371,8 @@ class CacheSynchronizer:
             if not query or len(query.strip()) < 3:
                 self.logger.debug(f"Skipping invalid query: '{query}' (too short or empty)")
                 return
-            if self.model and not embedding:
+            # Generate embedding if None and model is available
+            if embedding is None and self.model:
                 try:
                     embedding = self.model.encode(query, show_progress_bar=False)
                 except Exception as e:

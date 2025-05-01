@@ -1,5 +1,5 @@
 # analysis/table_identifier.py: Identifies tables from queries for TableIdentifier-v1
-# Fixes name_matches and weights iteration, improves column_scores, ~208 lines
+# Enhances production.stocks for stock/availability, ~208 lines
 
 import logging
 import logging.config
@@ -161,6 +161,12 @@ class TableIdentifier:
                         self.logger.debug(f"Column score match: '{column_key}' (score={score}) -> '{table_full}'")
                     except ValueError:
                         self.logger.debug(f"Invalid column key format: '{column_key}'")
+
+            # Custom rule for stock/availability
+            if any(token in ['stock', 'availability', 'stocks', 'quantities'] for token in tokens):
+                matched_tables.add('production.stocks')
+                confidence = max(confidence, 0.85)
+                self.logger.debug("Custom rule match: 'stock/availability' -> 'production.stocks'")
 
             result = list(matched_tables)
             confidence = min(confidence, self.max_confidence)

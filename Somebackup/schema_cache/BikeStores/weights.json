@@ -1,0 +1,36 @@
+{
+  "production.categories": {
+    "categories": 0.1
+  },
+  "production.brands": {
+    "brands": 0.1,
+    "brand_name": 0.1
+  },
+  "production.products": {
+    "products": 0.1
+  },
+  "production.stocks": {
+    "stocks": 0.1
+  },
+  "sales.customers": {
+    "customers": 0.1
+  },
+  "sales.stores": {
+    "stores": 0.1
+  },
+  "sales.staffs": {
+    "staffs": 0.1
+  },
+  "sales.orders": {
+    "orders": 0.1
+  },
+  "sales.order_items": {
+    "order_items": 0.1
+  },
+  "hr.candidates": {
+    "candidates": 0.1
+  },
+  "hr.employees": {
+    "employees": 0.1
+  }
+}

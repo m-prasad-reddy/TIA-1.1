@@ -1,5 +1,5 @@
 # cli/interface.py: CLI for TableIdentifier-v1
-# Adds ignored query validation, fixes embedding calls, ~589 lines
+# Adds prompt for correct tables on rejection, ~589 lines
 
 import os
 import json
@@ -250,13 +250,45 @@ class DatabaseAnalyzerCLI:
                         self.logger.error(f"Error storing feedback: {e}")
                         print("Failed to store feedback.")
                 else:
-                    self.cache_synchronizer.write_ignored_query(query, embedding, "user_rejected")
-                    self.query_history.append({
-                        'query': query,
-                        'tables': tables,
-                        'timestamp': datetime.now(),
-                        'rejected': True
-                    })
+                    print("Please enter the correct tables (comma-separated, e.g., production.stocks,sales.stores) or 'skip':")
+                    correct_tables = input().strip()
+                    if correct_tables.lower() != 'skip' and correct_tables:
+                        try:
+                            correct_tables_list = [t.strip() for t in correct_tables.split(',') if t.strip()]
+                            valid_tables, invalid_tables = self.table_identifier.validate_tables(correct_tables_list)
+                            if invalid_tables:
+                                print(f"Invalid tables: {', '.join(invalid_tables)}")
+                                self.logger.debug(f"Invalid tables provided: {invalid_tables}")
+                            if valid_tables and self.feedback_manager:
+                                self.feedback_manager.store_feedback(query, valid_tables)
+                                self.table_identifier.update_weights_from_feedback(query, valid_tables)
+                                self.table_identifier.save_name_matches()
+                                self.logger.debug(f"Stored feedback for correct tables: {valid_tables}")
+                                self.query_history.append({
+                                    'query': query,
+                                    'tables': valid_tables,
+                                    'timestamp': datetime.now()
+                                })
+                            else:
+                                self.cache_synchronizer.write_ignored_query(query, embedding, "user_rejected_no_valid_tables")
+                                self.query_history.append({
+                                    'query': query,
+                                    'tables': tables,
+                                    'timestamp': datetime.now(),
+                                    'rejected': True
+                                })
+                        except Exception as e:
+                            self.logger.error(f"Error processing correct tables: {e}")
+                            print("Error processing correct tables.")
+                            self.cache_synchronizer.write_ignored_query(query, embedding, "user_rejected_error")
+                    else:
+                        self.cache_synchronizer.write_ignored_query(query, embedding, "user_rejected")
+                        self.query_history.append({
+                            'query': query,
+                            'tables': tables,
+                            'timestamp': datetime.now(),
+                            'rejected': True
+                        })
                 
                 if len(self.query_history) > self.max_history:
                     self.query_history = self.query_history[-self.max_history:]

@@ -1,0 +1,40 @@
+{
+  "category_name": [
+    "category"
+  ],
+  "brand_id": [
+    "brand"
+  ],
+  "brand_name": [
+    "brands",
+    "brand",
+    "product_name"
+  ],
+  "product_id": [
+    "product_name"
+  ],
+  "product_name": [
+    "product"
+  ],
+  "store_id": [
+    "store"
+  ],
+  "name": [
+    "name"
+  ],
+  "customer_id": [
+    "customer"
+  ],
+  "store_name": [
+    "storename"
+  ],
+  "state": [
+    "usa"
+  ],
+  "order_id": [
+    "order"
+  ],
+  "staff_id": [
+    "staff"
+  ]
+}
