@@ -1,5 +1,5 @@
 # config/cache_synchronizer.py: Manages cache operations for TableIdentifier-v1
-# Adds read_feedback and read_ignored_queries, preserves original schema and functionality, ~360 lines
+# Adds query validation, handles None embeddings, preserves ~512 lines
 
 import os
 import sqlite3
@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 from sentence_transformers import util
 from datetime import datetime
+from config.model_singleton import ModelSingleton
 
 class CacheSynchronizer:
     """
@@ -54,6 +55,7 @@ class CacheSynchronizer:
         self.logger = logging.getLogger("cache_synchronizer")
         self.db_name = db_name
         self.db_path = os.path.join("app-config", db_name, "cache.db")
+        self.model = ModelSingleton().model
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         try:
             self.conn = sqlite3.connect(self.db_path)
@@ -71,7 +73,6 @@ class CacheSynchronizer:
         Matches original schema based on error logs.
         """
         try:
-            # Weights table: Stores table-column weights (uses 'column' per error log)
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS weights (
                     table_name TEXT,
@@ -80,7 +81,6 @@ class CacheSynchronizer:
                     PRIMARY KEY (table_name, column)
                 )
             """)
-            # Name matches table: Stores column synonyms (no 'source' per error log)
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS name_matches (
                     column_name TEXT,
@@ -88,7 +88,6 @@ class CacheSynchronizer:
                     PRIMARY KEY (column_name, synonym)
                 )
             """)
-            # Feedback table: Stores query feedback
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS feedback (
                     timestamp TEXT,
@@ -98,7 +97,6 @@ class CacheSynchronizer:
                     count INTEGER
                 )
             """)
-            # Ignored queries table: Stores ignored queries
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ignored_queries (
                     query TEXT PRIMARY KEY,
@@ -112,21 +110,23 @@ class CacheSynchronizer:
             self.logger.error(f"Error initializing database tables: {e}")
             raise
 
-    def _embedding_to_blob(self, embedding: np.ndarray) -> bytes:
+    def _embedding_to_blob(self, embedding: Optional[np.ndarray]) -> Optional[bytes]:
         """
         Convert numpy embedding to SQLite BLOB.
         
         Args:
-            embedding: Numpy array of embedding values.
+            embedding: Numpy array of embedding values or None.
         
         Returns:
-            Bytes representation of the embedding.
+            Bytes representation of the embedding or None.
         """
         try:
+            if embedding is None:
+                return None
             return embedding.tobytes()
         except Exception as e:
             self.logger.error(f"Error converting embedding to blob: {e}")
-            return b''
+            return None
 
     def _blob_to_embedding(self, blob: bytes, dim: int = 384) -> np.ndarray:
         """
@@ -303,7 +303,7 @@ class CacheSynchronizer:
             feedback = []
             for timestamp, query, tables_json, embedding_blob, count in self.cursor.fetchall():
                 tables = json.loads(tables_json)
-                embedding = self._blob_to_embedding(embedding_blob)
+                embedding = self._blob_to_embedding(embedding_blob) if embedding_blob else np.zeros(384, dtype=np.float32)
                 feedback.append((timestamp, query, tables, embedding, count))
             self.logger.debug(f"Retrieved {len(feedback)} feedback entries")
             return feedback
@@ -354,16 +354,25 @@ class CacheSynchronizer:
         except Exception as e:
             self.logger.error(f"Error updating feedback count for query '{query}': {e}")
 
-    def write_ignored_query(self, query: str, embedding: np.ndarray, reason: str):
+    def write_ignored_query(self, query: str, embedding: Optional[np.ndarray], reason: str):
         """
         Write ignored query to SQLite database.
         
         Args:
             query: Query string to ignore.
-            embedding: Numpy array of query embedding.
+            embedding: Numpy array of query embedding or None.
             reason: Reason for ignoring the query.
         """
         try:
+            if not query or len(query.strip()) < 3:
+                self.logger.debug(f"Skipping invalid query: '{query}' (too short or empty)")
+                return
+            if self.model and not embedding:
+                try:
+                    embedding = self.model.encode(query, show_progress_bar=False)
+                except Exception as e:
+                    self.logger.error(f"Error generating embedding for query '{query}': {e}")
+                    embedding = None
             embedding_blob = self._embedding_to_blob(embedding)
             self.cursor.execute(
                 "INSERT OR REPLACE INTO ignored_queries (query, embedding, reason) VALUES (?, ?, ?)",
@@ -385,13 +394,38 @@ class CacheSynchronizer:
             self.cursor.execute("SELECT query, embedding, reason FROM ignored_queries")
             ignored = []
             for query, embedding_blob, reason in self.cursor.fetchall():
-                embedding = self._blob_to_embedding(embedding_blob)
+                embedding = self._blob_to_embedding(embedding_blob) if embedding_blob else np.zeros(384, dtype=np.float32)
                 ignored.append((query, embedding, reason))
             self.logger.debug(f"Retrieved {len(ignored)} ignored queries")
             return ignored
         except Exception as e:
             self.logger.error(f"Error retrieving ignored queries: {e}")
             return []
+
+    def delete_ignored_query(self, query: str):
+        """
+        Delete an ignored query from SQLite database.
+        
+        Args:
+            query: Query string to remove.
+        """
+        try:
+            self.cursor.execute("DELETE FROM ignored_queries WHERE query = ?", (query,))
+            self.conn.commit()
+            self.logger.debug(f"Deleted ignored query: {query}")
+        except Exception as e:
+            self.logger.error(f"Error deleting ignored query '{query}': {e}")
+
+    def clear_ignored_queries(self):
+        """
+        Clear all ignored queries from SQLite database.
+        """
+        try:
+            self.cursor.execute("DELETE FROM ignored_queries")
+            self.conn.commit()
+            self.logger.debug("Cleared all ignored queries")
+        except Exception as e:
+            self.logger.error(f"Error clearing ignored queries: {e}")
 
     def read_ignored_queries(self) -> Dict[str, Dict[str, str]]:
         """

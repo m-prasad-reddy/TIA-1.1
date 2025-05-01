@@ -1,5 +1,5 @@
 # analysis/table_identifier.py: Identifies tables from queries for TableIdentifier-v1
-# Updates identify_tables to accept column_scores, preserves ~208 lines, fixes indentation
+# Fixes name_matches and weights iteration, improves column_scores, ~208 lines
 
 import logging
 import logging.config
@@ -52,9 +52,9 @@ class TableIdentifier:
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 handlers=[
                     logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
-                    logging.StreamHandler()
-                ]
-            )
+                        logging.StreamHandler()
+                    ]
+                )
             logging.error(f"Error loading logging config: {e}")
         
         self.logger = logging.getLogger("table_identifier")
@@ -69,8 +69,8 @@ class TableIdentifier:
         except Exception as e:
             self.logger.error(f"Failed to load spacy model: {e}")
             raise RuntimeError(f"Spacy model 'en_core_web_sm' not found. Run 'python -m spacy download en_core_web_sm'")
-        self.weights = self.cache_synchronizer.load_weights()
-        self.name_matches = self.cache_synchronizer.load_name_matches()
+        self.weights = self.cache_synchronizer.load_weights() or {}
+        self.name_matches = self.cache_synchronizer.load_name_matches() or {}
         self.similarity_threshold = 0.6
         self.max_confidence = 1.0
         self.logger.debug("Initialized TableIdentifier")
@@ -117,12 +117,10 @@ class TableIdentifier:
             # Weight-based matching
             for table_full, cols in self.weights.items():
                 for col, weight in cols.items():
-                    # Check full column name and tokens
                     if col in query_lower or any(token == col for token in tokens):
                         matched_tables.add(table_full)
                         confidence = max(confidence, weight)
                         self.logger.debug(f"Weight match: '{col}' in '{table_full}' (weight={weight})")
-                    # Check synonyms in tokens
                     for synonym in self.name_matches.get(col, []):
                         if any(token == synonym for token in tokens):
                             matched_tables.add(table_full)
@@ -132,7 +130,6 @@ class TableIdentifier:
             # Name match lookup
             for col, synonyms in self.name_matches.items():
                 for synonym in synonyms:
-                    # Check synonym in full query and tokens
                     if synonym in query_lower or any(token == synonym for token in tokens):
                         for schema in self.schema_dict['columns']:
                             for table, cols in self.schema_dict['columns'][schema].items():
@@ -155,12 +152,15 @@ class TableIdentifier:
 
             # Column score-based matching
             for column_key, score in column_scores.items():
-                schema, table, _ = column_key.split('.')
-                table_full = f"{schema}.{table}"
                 if score > 0:
-                    matched_tables.add(table_full)
-                    confidence = max(confidence, min(score * 0.5, 0.9))  # Cap contribution
-                    self.logger.debug(f"Column score match: '{column_key}' (score={score}) -> '{table_full}'")
+                    try:
+                        schema, table, _ = column_key.split('.')
+                        table_full = f"{schema}.{table}"
+                        matched_tables.add(table_full)
+                        confidence = max(confidence, min(score * 0.5, 0.9))
+                        self.logger.debug(f"Column score match: '{column_key}' (score={score}) -> '{table_full}'")
+                    except ValueError:
+                        self.logger.debug(f"Invalid column key format: '{column_key}'")
 
             result = list(matched_tables)
             confidence = min(confidence, self.max_confidence)
@@ -180,11 +180,12 @@ class TableIdentifier:
         """
         try:
             for table in tables:
-                if table in self.weights:
-                    for col in self.schema_dict['columns'].get(table.split('.')[0], {}).get(table.split('.')[1], {}):
-                        col_lower = col.lower()
-                        self.weights[table][col_lower] = min(self.weights[table].get(col_lower, 0.05) + 0.01, 0.5)
-                        self.logger.debug(f"Updated weight for '{col_lower}' in '{table}' to {self.weights[table][col_lower]}")
+                if table not in self.weights:
+                    self.weights[table] = {}
+                for col in self.schema_dict['columns'].get(table.split('.')[0], {}).get(table.split('.')[1], []):
+                    col_lower = col.lower()
+                    self.weights[table][col_lower] = min(self.weights[table].get(col_lower, 0.05) + 0.01, 0.5)
+                    self.logger.debug(f"Updated weight for '{col_lower}' in '{table}' to {self.weights[table][col_lower]}")
             self.cache_synchronizer.write_weights(self.weights)
             self.logger.debug("Weights updated from feedback")
         except Exception as e:
@@ -204,7 +205,7 @@ class TableIdentifier:
                 self.name_matches[column_lower] = []
             self.name_matches[column_lower].extend(syn for syn in synonyms if syn not in self.name_matches[column_lower])
             self.name_matches[column_lower] = list(set(self.name_matches[column_lower]))
-            self.cache_synchronizer.write_name_matches(self.name_matches, 'user')
+            self.cache_synchronizer.write_name_matches(self.name_matches)
             self.logger.debug(f"Updated name matches for '{column_lower}': {self.name_matches[column_lower]}")
         except Exception as e:
             self.logger.error(f"Error updating name matches for '{column}': {e}")
@@ -212,7 +213,7 @@ class TableIdentifier:
     def save_name_matches(self):
         """Save name matches to cache."""
         try:
-            self.cache_synchronizer.write_name_matches(self.name_matches, 'user')
+            self.cache_synchronizer.write_name_matches(self.name_matches)
             self.logger.debug("Saved name matches to cache")
         except Exception as e:
             self.logger.error(f"Error saving name matches: {e}")

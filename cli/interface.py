@@ -1,5 +1,5 @@
 # cli/interface.py: CLI for TableIdentifier-v1
-# Fixes _view_schema for foreign keys, ~583 lines, based on TIV-1.1 repository
+# Adds ignored query validation, fixes embedding calls, ~589 lines
 
 import os
 import json
@@ -16,16 +16,15 @@ from config.patterns import PatternManager
 from config.manager import DatabaseConnection
 from schema.manager import SchemaManager
 import re
+from config.model_singleton import ModelSingleton
 
 class DatabaseAnalyzerCLI:
     """CLI for TableIdentifier-v1, providing database interaction and query processing."""
     
     def __init__(self, db_name: str, schema_dict: Dict = None, feedback_manager: Optional[FeedbackManager] = None):
         """Initialize with database name, schema dictionary, and optional feedback manager."""
-        # Ensure logs directory exists
         os.makedirs("logs", exist_ok=True)
         
-        # Configure logging
         logging_config_path = "app-config/logging_config.ini"
         try:
             if os.path.exists(logging_config_path):
@@ -59,8 +58,8 @@ class DatabaseAnalyzerCLI:
         self.pattern_manager = PatternManager(self.schema_dict)
         self.name_match_manager = NameMatchManager(db_name)
         self.table_identifier = TableIdentifier(
-            db_name,
             self.schema_dict,
+            self.feedback_manager,
             self.pattern_manager,
             self.cache_synchronizer
         )
@@ -70,6 +69,7 @@ class DatabaseAnalyzerCLI:
         self.max_history = 50
         self.connection_manager = None
         self.schema_manager = None
+        self.model = ModelSingleton().model
         self.logger.debug(f"Initialized DatabaseAnalyzerCLI for {db_name}")
 
     def run(self):
@@ -167,8 +167,8 @@ class DatabaseAnalyzerCLI:
             self.feedback_manager = FeedbackManager(db_name)
             self.name_match_manager = NameMatchManager(db_name)
             self.table_identifier = TableIdentifier(
-                db_name,
                 self.schema_dict,
+                self.feedback_manager,
                 self.pattern_manager,
                 self.cache_synchronizer
             )
@@ -215,7 +215,6 @@ class DatabaseAnalyzerCLI:
                     print("Query cannot be empty.")
                     continue
                 
-                # Validate query
                 is_valid, reason = self._validate_query(query)
                 if not is_valid:
                     print(f"Query rejected: {reason}")
@@ -224,26 +223,26 @@ class DatabaseAnalyzerCLI:
                     print("- List all stores in New York")
                     continue
                 
-                # Process query with synonyms
                 processed_query = self._expand_query_with_synonyms(query)
                 column_scores = self.name_match_manager.process_query(processed_query, self.schema_dict)
                 tables, confidence = self.table_identifier.identify_tables(processed_query, column_scores)
                 
                 if not tables:
                     print("No tables identified for the query.")
-                    self.cache_synchronizer.write_ignored_query(query, None, "no_tables_identified")
+                    embedding = self.model.encode(query, show_progress_bar=False) if self.model else None
+                    self.cache_synchronizer.write_ignored_query(query, embedding, "no_tables_identified")
                     self.query_history.append({'query': query, 'tables': [], 'timestamp': datetime.now()})
                     continue
                 
                 print(f"\nIdentified Tables: {', '.join(tables)}")
-                print(f"Confidence: {'High' if confidence else 'Low'}")
+                print(f"Confidence: {'High' if confidence > 0.5 else 'Low'}")
                 
-                # Prompt for user feedback
                 feedback_ok = input("Are these tables correct? (y/n): ").strip().lower()
+                embedding = self.model.encode(query, show_progress_bar=False) if self.model else None
                 if feedback_ok == 'y' and self.feedback_manager:
                     try:
                         self.feedback_manager.store_feedback(query, tables)
-                        self.table_identifier.update_weights(query, tables)
+                        self.table_identifier.update_weights_from_feedback(query, tables)
                         self.table_identifier.save_name_matches()
                         self.logger.debug("Stored feedback and updated weights")
                         self.query_history.append({'query': query, 'tables': tables, 'timestamp': datetime.now()})
@@ -251,12 +250,16 @@ class DatabaseAnalyzerCLI:
                         self.logger.error(f"Error storing feedback: {e}")
                         print("Failed to store feedback.")
                 else:
-                    self.cache_synchronizer.write_ignored_query(query, None, "user_rejected")
-                    self.query_history.append({'query': query, 'tables': tables, 'timestamp': datetime.now(), 'rejected': True})
+                    self.cache_synchronizer.write_ignored_query(query, embedding, "user_rejected")
+                    self.query_history.append({
+                        'query': query,
+                        'tables': tables,
+                        'timestamp': datetime.now(),
+                        'rejected': True
+                    })
                 
-                # Trim query history
                 if len(self.query_history) > self.max_history:
-                    self.query_history = self.query_history[-self_max_history:]
+                    self.query_history = self.query_history[-self.max_history:]
         except Exception as e:
             self.logger.error(f"Error in query mode: {e}")
             print("An error occurred in query mode.")
@@ -268,29 +271,27 @@ class DatabaseAnalyzerCLI:
                 self.logger.debug("Query too short or empty")
                 return False, "Query too short or empty"
             
-            # Check language
             try:
                 lang = langdetect.detect(query)
                 if lang != 'en':
                     self.logger.debug(f"Non-English query detected: {query} (lang: {lang})")
-                    self.cache_synchronizer.write_ignored_query(query, None, "non_english")
+                    self.cache_synchronizer.write_ignored_query(
+                        query, None, "non_english"
+                    )
                     return False, "Non-English query"
             except Exception as e:
                 self.logger.warning(f"Language detection failed: {e}")
             
-            # Check ignored queries
             ignored_queries = self.cache_synchronizer.read_ignored_queries()
             for iq, info in ignored_queries.items():
                 if query.lower() == iq.lower():
                     self.logger.debug(f"Ignored query matched: {query}")
                     return False, f"Ignored query (reason: {info['reason']})"
             
-            # Check schema relevance
             if not self.schema_dict or 'tables' not in self.schema_dict:
                 self.logger.warning("Schema dictionary empty or invalid")
                 return False, "Schema not initialized"
             
-            # Check for table or column mentions
             query_lower = query.lower()
             for schema in self.schema_dict['tables']:
                 for table in self.schema_dict['tables'][schema]:
@@ -389,8 +390,8 @@ class DatabaseAnalyzerCLI:
             self.feedback_manager = FeedbackManager(db_name)
             self.name_match_manager = NameMatchManager(db_name)
             self.table_identifier = TableIdentifier(
-                db_name,
                 self.schema_dict,
+                self.feedback_manager,
                 self.pattern_manager,
                 self.cache_synchronizer
             )
@@ -464,7 +465,7 @@ class DatabaseAnalyzerCLI:
             print("An error occurred while managing feedback.")
 
     def _manage_ignored_queries(self):
-        """Manage ignored queries."""
+        """Manage ignored queries with validation."""
         try:
             while True:
                 print("\nManage Ignored Queries:")
@@ -486,13 +487,21 @@ class DatabaseAnalyzerCLI:
                             print(f"- {query} (Reason: {info['reason']})")
                 elif choice == '2':
                     query = input("Enter query to ignore: ").strip()
+                    if not query or len(query.strip()) < 3:
+                        print("Query must be at least 3 characters long.")
+                        continue
+                    ignored_queries = self.cache_synchronizer.read_ignored_queries()
+                    if query.lower() in [q.lower() for q in ignored_queries]:
+                        print(f"Query '{query}' is already ignored.")
+                        continue
                     reason = input("Enter reason: ").strip()
-                    if query and reason:
-                        self.cache_synchronizer.write_ignored_query(query, None, reason)
-                        print(f"Ignored query added: {query}")
-                        self.logger.debug(f"Added ignored query: {query}")
-                    else:
-                        print("Query and reason cannot be empty.")
+                    if not reason:
+                        print("Reason cannot be empty.")
+                        continue
+                    embedding = self.model.encode(query, show_progress_bar=False) if self.model else None
+                    self.cache_synchronizer.write_ignored_query(query, embedding, reason)
+                    print(f"Ignored query added: {query}")
+                    self.logger.debug(f"Added ignored query: {query}")
                 elif choice == '3':
                     query = input("Enter query to remove: ").strip()
                     ignored_queries = self.cache_synchronizer.read_ignored_queries()
