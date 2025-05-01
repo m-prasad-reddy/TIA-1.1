@@ -1,0 +1,47 @@
+```plantuml
+@startuml TIA Architecture
+
+package "Core Modules" #..# {
+  [DatabaseAnalyzerCLI] #--> [TableIdentifier]
+  [DatabaseAnalyzerCLI] #--> [CacheSynchronizer]
+  [TableIdentifier] #--> [CacheSynchronizer]
+}
+
+package "Supporting Modules" #..# {
+  [NameMatchManager] #--> [CacheSynchronizer]
+  [FeedbackManager] #--> [CacheSynchronizer]
+  [PatternManager]
+  [SchemaManager]
+  [ModelSingleton]
+  [DatabaseConnection]
+}
+
+[User] --> [DatabaseAnalyzerCLI] : Interacts via CLI
+[DatabaseAnalyzerCLI] --> [Database\n(SQL, NoSQL, DW, DL)] : Connects
+[CacheSynchronizer] --> [SQLite Cache\n(cache.db)] : Reads/Writes
+[TableIdentifier] --> [NameMatchManager] : Uses for column scoring
+[TableIdentifier] --> [FeedbackManager] : Uses for feedback
+[TableIdentifier] --> [PatternManager] : Uses for regex patterns
+[DatabaseAnalyzerCLI] --> [SchemaManager] : Uses for schema data
+[TableIdentifier] --> [ModelSingleton] : Uses for embeddings
+[DatabaseAnalyzerCLI] --> [DatabaseConnection] : Uses for DB access
+[SchemaManager] --> [Database\n(SQL, NoSQL, DW, DL)] : Reads schema
+[User] --> [tia_app.log] : Views logs
+
+note right of [DatabaseAnalyzerCLI]
+  Handles CLI, query validation,
+  feedback collection
+end note
+
+note right of [TableIdentifier]
+  Maps queries to tables using
+  NLP, patterns, weights
+end note
+
+note right of [CacheSynchronizer]
+  Manages weights, name matches,
+  feedback, ignored queries
+end note
+
+@enduml
+```
