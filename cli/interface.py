@@ -1,5 +1,5 @@
 # cli/interface.py: CLI for TableIdentifier-v1
-# Adds prompt for correct tables on rejection, ~589 lines
+# Updates _validate_query with schema-based fallback for language detection, ~589 lines
 
 import os
 import json
@@ -297,41 +297,64 @@ class DatabaseAnalyzerCLI:
             print("An error occurred in query mode.")
 
     def _validate_query(self, query: str) -> Tuple[bool, str]:
-        """Validate query for language, length, and relevance."""
+        """Validate query for length, language, and relevance with schema-based fallback."""
         try:
             if not query or len(query.strip()) < 3:
                 self.logger.debug("Query too short or empty")
                 return False, "Query too short or empty"
             
+            query_lower = query.lower()
+            
+            # Check for schema relevance first to allow fallback
+            schema_match = False
+            if self.schema_dict and 'tables' in self.schema_dict:
+                for schema in self.schema_dict['tables']:
+                    for table in self.schema_dict['tables'][schema]:
+                        if table.lower() in query_lower:
+                            schema_match = True
+                            self.logger.debug(f"Schema match: table '{table}' in query")
+                            break
+                        for column in self.schema_dict['columns'].get(schema, {}).get(table, []):
+                            if column.lower() in query_lower:
+                                schema_match = True
+                                self.logger.debug(f"Schema match: column '{column}' in query")
+                                break
+                    if schema_match:
+                        break
+            
+            # Language detection with fallback
             try:
                 lang = langdetect.detect(query)
                 if lang != 'en':
+                    if schema_match:
+                        self.logger.debug(f"Non-English detected (lang: {lang}), but schema match found, assuming English: {query}")
+                        return True, ""
                     self.logger.debug(f"Non-English query detected: {query} (lang: {lang})")
-                    self.cache_synchronizer.write_ignored_query(
-                        query, None, "non_english"
-                    )
-                    return False, "Non-English query"
-            except Exception as e:
-                self.logger.warning(f"Language detection failed: {e}")
+                    self.cache_synchronizer.write_ignored_query(query, None, f"non_english_lang_{lang}")
+                    return False, f"Non-English query (detected: {lang})"
+            except langdetect.lang_detect_exception.LangDetectException as e:
+                self.logger.warning(f"Language detection failed for '{query}': {e}")
+                if schema_match:
+                    self.logger.debug(f"Language detection failed, but schema match found, assuming English: {query}")
+                    return True, ""
+                self.cache_synchronizer.write_ignored_query(query, None, "language_detection_failed")
+                return False, "Language detection failed"
             
+            # Check ignored queries
             ignored_queries = self.cache_synchronizer.read_ignored_queries()
             for iq, info in ignored_queries.items():
-                if query.lower() == iq.lower():
+                if query_lower == iq.lower():
                     self.logger.debug(f"Ignored query matched: {query}")
                     return False, f"Ignored query (reason: {info['reason']})"
             
+            # Schema relevance check (already performed, but ensure schema is initialized)
             if not self.schema_dict or 'tables' not in self.schema_dict:
                 self.logger.warning("Schema dictionary empty or invalid")
                 return False, "Schema not initialized"
             
-            query_lower = query.lower()
-            for schema in self.schema_dict['tables']:
-                for table in self.schema_dict['tables'][schema]:
-                    if table.lower() in query_lower:
-                        return True, ""
-                    for column in self.schema_dict['columns'].get(schema, {}).get(table, []):
-                        if column.lower() in query_lower:
-                            return True, ""
+            if schema_match:
+                return True, ""
+            
             self.logger.debug(f"No relevant tables or columns found in query: {query}")
             self.cache_synchronizer.write_ignored_query(query, None, "irrelevant")
             return False, "No relevant tables or columns found"
