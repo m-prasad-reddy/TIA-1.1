@@ -1,6 +1,6 @@
-# Table Identifier Agent (TIA) 1.1
+# Table Identification Agent (TIA)
 
-The **Table Identifier Agent (TIA)** is a Python-based command-line interface (CLI) application designed to analyze natural language queries and identify relevant database tables or entities across various database systems. It supports relational databases (e.g., Microsoft SQL Server’s BikeStores), NoSQL databases, Data Warehouses, Data Lakes, and other database applications. TIA leverages natural language processing (NLP), semantic similarity, regex patterns, and user feedback to map queries to schema elements, enhancing database interaction for developers and analysts.
+The **Table Identification Agent (TIA)** is a Python-based command-line interface (CLI) application designed to analyze natural language queries and identify relevant database tables or entities across various database systems. It supports relational databases (e.g., Microsoft SQL Server, MY SQL,etc.,), NoSQL databases, Data Warehouses, Data Lakes, and other database applications. TIA leverages natural language processing (NLP), semantic similarity, regex patterns, and user feedback to map queries to schema elements, enhancing database interaction for developers and analysts.
 
 ## Table of Contents
 - [Features](#features)
@@ -222,7 +222,7 @@ python -m spacy download en_core_web_sm
 ### Setup
 1. Clone the repository:
    ```bash
-   git clone https://github.com/m-prasad-reddy/TableIdentifier-v2.git
+   git clone https://github.com/m-prasad-reddy/TIA-1.1.git
    cd TableIdentifier-v2
    ```
 
