@@ -1,12 +1,12 @@
-# cli/interface.py: CLI for TIA-1.1
-# Relaxed query validation and added similar feedback table display
+# cli/interface.py: CLI for TableIdentifier-v2.1
+# Added table list display, enhanced non-English query handling, and improved feedback learning
 
 import os
 import json
 import logging
 import logging.config
 from typing import Dict, List, Optional, Tuple
-import langdetect
+from langdetect import detect_langs, LangDetectException
 from datetime import datetime
 import re
 from config.cache_synchronizer import CacheSynchronizer
@@ -21,7 +21,7 @@ import spacy
 import numpy as np
 
 class DatabaseAnalyzerCLI:
-    """CLI for TIA-1.1, providing database interaction and query processing."""
+    """CLI for TableIdentifier-v2.1, providing database interaction and query processing."""
     
     def __init__(self, db_name: str, schema_dict: Dict = None, feedback_manager: Optional[FeedbackManager] = None,
                  schemas: List[str] = None, tables: List[str] = None):
@@ -48,9 +48,9 @@ class DatabaseAnalyzerCLI:
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 handlers=[
                     logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
-                    logging.StreamHandler()
-                ]
-            )
+                        logging.StreamHandler()
+                    ]
+                )
             logging.error(f"Error loading logging config: {e}")
         
         self.logger = logging.getLogger("interface")
@@ -82,6 +82,13 @@ class DatabaseAnalyzerCLI:
             raise RuntimeError(f"Spacy model 'en_core_web_sm' not found. Run 'python -m spacy download en_core_web_sm'")
         self.model = ModelSingleton().model
         self.logger.debug(f"Initialized DatabaseAnalyzerCLI for {db_name}")
+        self.example_queries = [
+            {"query": "Show me store details", "tables": ["sales.stores"]},
+            {"query": "List products in stock", "tables": ["production.stocks", "production.products"]},
+            {"query": "Get customer orders", "tables": ["sales.orders", "sales.customers"]},
+            {"query": "Show staff in each store", "tables": ["sales.staffs", "sales.stores"]},
+            {"query": "Find products by category", "tables": ["production.products", "production.categories"]}
+        ]
 
     def run(self):
         """Run the CLI with main menu."""
@@ -215,22 +222,22 @@ class DatabaseAnalyzerCLI:
     def _query_mode(self):
         """Handle query mode with advanced processing and synonym caching."""
         try:
+            # Display example queries
             example_queries = []
             if self.feedback_manager:
                 try:
                     example_queries = self.feedback_manager.get_top_queries(limit=5)
-                    if example_queries:
-                        print("\nExample Queries:")
-                        for i, q in enumerate(example_queries, 1):
-                            print(f"{i}. {q['query']} -> {', '.join(q['tables'])}")
-                    else:
-                        print("\nNo example queries available.")
+                    if not example_queries:
+                        example_queries = self.example_queries
                 except Exception as e:
                     self.logger.error(f"Error loading example queries: {e}")
-                    print("Could not load example queries.")
+                    example_queries = self.example_queries
             else:
-                self.logger.warning("Feedback manager not initialized, skipping example queries")
-                print("Feedback manager not initialized.")
+                example_queries = self.example_queries
+            
+            print("\nExample Queries:")
+            for i, q in enumerate(example_queries, 1):
+                print(f"{i}. {q['query']} -> {', '.join(q['tables'])}")
             
             while True:
                 query = input("\nEnter query (or 'back'): ").strip()
@@ -244,10 +251,9 @@ class DatabaseAnalyzerCLI:
                 is_valid, reason = self._validate_query(query)
                 if not is_valid:
                     print(f"Query rejected: {reason}")
-                    print("Example queries:")
-                    print("- Show me customer names")
-                    print("- How many orders were delivered in 2016?")
-                    print("- What production categories are available?")
+                    print("\nExample Queries:")
+                    for i, q in enumerate(example_queries, 1):
+                        print(f"{i}. {q['query']} -> {', '.join(q['tables'])}")
                     continue
                 
                 processed_query = self._expand_query_with_synonyms(query)
@@ -286,7 +292,16 @@ class DatabaseAnalyzerCLI:
                 print(f"\nIdentified Tables: {', '.join(tables)}")
                 print(f"Confidence: {'High' if confidence > 0.5 else 'Low'}")
                 
-                feedback_ok = input("Are these tables correct? (y/n): ").strip().lower()
+                # Display available tables
+                print("\nAvailable Tables:")
+                valid_tables = []
+                for schema in self.schema_dict.get('tables', {}):
+                    for table in self.schema_dict['tables'][schema]:
+                        valid_tables.append(f"{schema}.{table}")
+                for i, table in enumerate(sorted(valid_tables), 1):
+                    print(f"{i}. {table}")
+                
+                feedback_ok = input("\nAre these tables correct? (y/n): ").strip().lower()
                 embedding = self.model.encode(query, show_progress_bar=False) if self.model else None
                 if feedback_ok == 'y' and self.feedback_manager:
                     try:
@@ -306,16 +321,33 @@ class DatabaseAnalyzerCLI:
                         self.logger.error(f"Error storing feedback: {e}")
                         print("Failed to store feedback.")
                 else:
-                    print("Please enter the correct tables (comma-separated, e.g., production.stocks,sales.stores) or 'skip':")
-                    correct_tables = input().strip()
-                    if correct_tables.lower() != 'skip' and correct_tables:
-                        try:
-                            correct_tables_list = [t.strip() for t in correct_tables.split(',') if t.strip()]
-                            valid_tables, invalid_tables = self.table_identifier.validate_tables(correct_tables_list)
-                            if invalid_tables:
-                                print(f"Invalid tables: {', '.join(invalid_tables)}")
-                                self.logger.debug(f"Invalid tables provided: {invalid_tables}")
-                            if valid_tables and self.feedback_manager:
+                    print("\nPlease enter the correct tables (comma-separated, e.g., sales.stores,production.products) or 'skip':")
+                    while True:
+                        correct_tables = input().strip()
+                        if correct_tables.lower() == 'skip':
+                            self.cache_synchronizer.write_ignored_query(query, embedding, "user_rejected")
+                            self.query_history.append({
+                                'query': query,
+                                'tables': tables,
+                                'confidence': confidence,
+                                'timestamp': datetime.now(),
+                                'rejected': True
+                            })
+                            break
+                        
+                        correct_tables_list = [t.strip() for t in correct_tables.split(',') if t.strip()]
+                        valid_tables, invalid_tables = self.table_identifier.validate_tables(correct_tables_list)
+                        if invalid_tables:
+                            print(f"\nInvalid tables: {', '.join(invalid_tables)}")
+                            self.logger.debug(f"Invalid tables provided: {invalid_tables}")
+                            print("\nAvailable Tables:")
+                            for i, table in enumerate(sorted(valid_tables), 1):
+                                print(f"{i}. {table}")
+                            print("\nPlease enter valid tables (comma-separated) or 'skip':")
+                            continue
+                        
+                        if valid_tables and self.feedback_manager:
+                            try:
                                 timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
                                 self.feedback_manager.store_feedback(query, valid_tables, self.schema_dict, confidence=confidence)
                                 self.table_identifier.update_weights_from_feedback(query, valid_tables)
@@ -331,7 +363,7 @@ class DatabaseAnalyzerCLI:
                                         for col in columns:
                                             col_lower = col.lower()
                                             similarity = self.name_match_manager.compute_similarity(token, col_lower)
-                                            if similarity > 0.65 and not self.name_match_manager._suggest_synonym(token, col, schema, table_name):
+                                            if similarity > 0.65:
                                                 self.name_match_manager.dynamic_matches.setdefault(col_lower, []).append(token)
                                                 self.name_match_manager._save_dynamic_matches()
                                                 self.logger.debug(f"Cached synonym '{token}' for '{col_lower}' in '{table}' (sim={similarity:.2f})")
@@ -341,28 +373,22 @@ class DatabaseAnalyzerCLI:
                                     'confidence': confidence,
                                     'timestamp': datetime.now()
                                 })
-                            else:
-                                self.cache_synchronizer.write_ignored_query(query, embedding, "user_rejected_no_valid_tables")
-                                self.query_history.append({
-                                    'query': query,
-                                    'tables': tables,
-                                    'confidence': confidence,
-                                    'timestamp': datetime.now(),
-                                    'rejected': True
-                                })
-                        except Exception as e:
-                            self.logger.error(f"Error processing correct tables: {e}")
-                            print(f"Error processing correct tables: {e}")
-                            self.cache_synchronizer.write_ignored_query(query, embedding, "user_rejected_error")
-                    else:
-                        self.cache_synchronizer.write_ignored_query(query, embedding, "user_rejected")
-                        self.query_history.append({
-                            'query': query,
-                            'tables': tables,
-                            'confidence': confidence,
-                            'timestamp': datetime.now(),
-                            'rejected': True
-                        })
+                                break
+                            except Exception as e:
+                                self.logger.error(f"Error processing correct tables: {e}")
+                                print(f"Error processing correct tables: {e}")
+                                self.cache_synchronizer.write_ignored_query(query, embedding, "user_rejected_error")
+                                break
+                        else:
+                            self.cache_synchronizer.write_ignored_query(query, embedding, "user_rejected_no_valid_tables")
+                            self.query_history.append({
+                                'query': query,
+                                'tables': tables,
+                                'confidence': confidence,
+                                'timestamp': datetime.now(),
+                                'rejected': True
+                            })
+                            break
                 
                 if len(self.query_history) > self.max_history:
                     self.query_history = self.query_history[-self.max_history:]
@@ -396,77 +422,57 @@ class DatabaseAnalyzerCLI:
                         self.logger.debug(f"Query matched feedback: {query}")
                         return True, ""
             
-            # Check for schema and synonym relevance
-            schema_match = False
-            if self.schema_dict and 'tables' in self.schema_dict:
-                # Load cached synonyms
-                default_matches = self.name_match_manager.default_matches
-                dynamic_matches = self.name_match_manager.dynamic_matches
-                tokens = cleaned_query.split()
-                
-                for token in tokens:
-                    # Exact table/column match
-                    for schema in self.schema_dict['tables']:
-                        for table in self.schema_dict['tables'][schema]:
-                            if token in table.lower():
-                                schema_match = True
-                                self.logger.debug(f"Schema match: table '{token}' in query")
-                                break
-                            for column in self.schema_dict['columns'].get(schema, {}).get(table, []):
-                                if token in column.lower():
-                                    schema_match = True
-                                    self.logger.debug(f"Schema match: column '{token}' in query")
-                                    break
-                        if schema_match:
-                            break
-                    # Synonym match
-                    for col, synonyms in {**default_matches, **dynamic_matches}.items():
-                        if token in synonyms:
-                            schema_match = True
-                            self.logger.debug(f"Synonym match: '{token}' for column '{col}'")
-                            break
-                    # Embedding-based similarity
-                    if not schema_match:
-                        token_embedding = self.model.encode(token, show_progress_bar=False)
-                        for schema in self.schema_dict['tables']:
-                            for table in self.schema_dict['tables'][schema]:
-                                for column in self.schema_dict['columns'].get(schema, {}).get(table, []):
-                                    col_embedding = self.model.encode(column.lower(), show_progress_bar=False)
-                                    similarity = np.dot(token_embedding, col_embedding) / (
-                                        np.linalg.norm(token_embedding) * np.linalg.norm(col_embedding)
-                                    )
-                                    if similarity > 0.65:
-                                        schema_match = True
-                                        self.logger.debug(f"Embedding match: '{token}' similar to '{column}' (sim={similarity:.2f})")
-                                        break
-                            if schema_match:
-                                break
-                    if schema_match:
-                        break
-            
-            # Language detection with override
+            # Language detection
             try:
-                lang_result = langdetect.detect_langs(cleaned_query)
+                lang_result = detect_langs(cleaned_query)
                 lang, confidence = lang_result[0].lang, lang_result[0].prob
                 self.logger.debug(f"Language detection: lang={lang}, confidence={confidence:.2f}")
                 if lang != 'en' and confidence > 0.9:
+                    # Check for schema and synonym relevance
+                    tokens = self.name_match_manager.extract_tokens(cleaned_query)
+                    schema_match = False
+                    for token in tokens:
+                        for schema in self.schema_dict.get('tables', {}):
+                            for table in self.schema_dict['tables'][schema]:
+                                if token.lower() in table.lower():
+                                    schema_match = True
+                                    self.logger.debug(f"Non-English schema match: table '{token}' in query")
+                                    break
+                                for column in self.schema_dict['columns'].get(schema, {}).get(table, []):
+                                    if token.lower() in column.lower():
+                                        schema_match = True
+                                        self.logger.debug(f"Non-English schema match: column '{token}' in query")
+                                        break
+                                # Check synonyms
+                                for col, synonyms in {**self.name_match_manager.default_matches, **self.name_match_manager.dynamic_matches}.items():
+                                    if token.lower() in synonyms:
+                                        schema_match = True
+                                        self.logger.debug(f"Non-English synonym match: '{token}' for column '{col}'")
+                                        break
+                            if schema_match:
+                                break
+                        if schema_match:
+                            break
+                    
+                    example_queries = self.feedback_manager.get_top_queries(limit=5) if self.feedback_manager else self.example_queries
+                    print("\nNon-English query detected. Example English queries:")
+                    for i, q in enumerate(example_queries, 1):
+                        print(f"{i}. {q['query']} -> {', '.join(q['tables'])}")
+                    
                     if schema_match:
-                        self.logger.debug(f"Non-English detected (lang: {lang}, conf: {confidence:.2f}), but schema match found")
-                        return True, ""
-                    print(f"Non-English query detected (language: {lang}, confidence: {confidence:.2f})")
-                    override = input("Force English processing? (y/n): ").strip().lower()
-                    if override == 'y':
-                        self.logger.debug(f"User forced English for query: {query}")
-                        return True, ""
-                    self.cache_synchronizer.write_ignored_query(query, None, f"non_english_lang_{lang}")
-                    return False, f"Non-English query (detected: {lang})"
-            except langdetect.lang_detect_exception.LangDetectException as e:
+                        print(f"\nNon-English query detected (language: {lang}, confidence: {confidence:.2f})")
+                        override = input("Force English processing? (y/n): ").strip().lower()
+                        if override == 'y':
+                            self.logger.debug(f"User forced English for query: {query}")
+                            return True, ""
+                        self.cache_synchronizer.write_ignored_query(query, None, f"non_english_lang_{lang}")
+                        return False, f"Non-English query (detected: {lang})"
+                    else:
+                        self.cache_synchronizer.write_ignored_query(query, None, f"non_english_irrelevant_{lang}")
+                        return False, f"Non-English query unrelated to database (detected: {lang})"
+            except LangDetectException as e:
                 self.logger.warning(f"Language detection failed for '{query}': {e}")
-                if schema_match:
-                    self.logger.debug(f"Language detection failed, but schema match found")
-                    return True, ""
-                self.cache_synchronizer.write_ignored_query(query, None, "language_detection_failed")
-                return False, "Language detection failed"
+                return True, ""  # Proceed if language detection fails
             
             # Check ignored queries
             ignored_queries = self.cache_synchronizer.read_ignored_queries()
@@ -489,6 +495,46 @@ class DatabaseAnalyzerCLI:
             if not self.schema_dict or 'tables' not in self.schema_dict:
                 self.logger.warning("Schema dictionary empty or invalid")
                 return False, "Schema not initialized"
+            
+            # Check for schema and synonym relevance
+            schema_match = False
+            tokens = self.name_match_manager.extract_tokens(cleaned_query)
+            for token in tokens:
+                for schema in self.schema_dict.get('tables', {}):
+                    for table in self.schema_dict['tables'][schema]:
+                        if token.lower() in table.lower():
+                            schema_match = True
+                            self.logger.debug(f"Schema match: table '{token}' in query")
+                            break
+                        for column in self.schema_dict['columns'].get(schema, {}).get(table, []):
+                            if token.lower() in column.lower():
+                                schema_match = True
+                                self.logger.debug(f"Schema match: column '{token}' in query")
+                                break
+                    if schema_match:
+                        break
+                for col, synonyms in {**self.name_match_manager.default_matches, **self.name_match_manager.dynamic_matches}.items():
+                    if token.lower() in synonyms:
+                        schema_match = True
+                        self.logger.debug(f"Synonym match: '{token}' for column '{col}'")
+                        break
+                if not schema_match:
+                    token_embedding = self.model.encode(token, show_progress_bar=False)
+                    for schema in self.schema_dict.get('tables', {}):
+                        for table in self.schema_dict['tables'][schema]:
+                            for column in self.schema_dict['columns'].get(schema, {}).get(table, []):
+                                col_embedding = self.model.encode(column.lower(), show_progress_bar=False)
+                                similarity = np.dot(token_embedding, col_embedding) / (
+                                    np.linalg.norm(token_embedding) * np.linalg.norm(col_embedding)
+                                )
+                                if similarity > 0.65:
+                                    schema_match = True
+                                    self.logger.debug(f"Embedding match: '{token}' similar to '{column}' (sim={similarity:.2f})")
+                                    break
+                        if schema_match:
+                            break
+                if schema_match:
+                    break
             
             if schema_match or has_intent:
                 self.logger.debug(f"Query validated: {query} (schema_match={schema_match}, has_intent={has_intent})")
@@ -648,14 +694,27 @@ class DatabaseAnalyzerCLI:
                             print(f"- Query: {entry['query']}, Tables: {', '.join(entry['tables'])}, Count: {entry['count']}, Confidence: {entry['confidence']:.2f}")
                 elif choice == '2':
                     query = input("Enter query: ").strip()
+                    print("\nAvailable Tables:")
+                    valid_tables = []
+                    for schema in self.schema_dict.get('tables', {}):
+                        for table in self.schema_dict['tables'][schema]:
+                            valid_tables.append(f"{schema}.{table}")
+                    for i, table in enumerate(sorted(valid_tables), 1):
+                        print(f"{i}. {table}")
                     tables = input("Enter tables (comma-separated): ").strip().split(',')
                     tables = [t.strip() for t in tables if t.strip()]
                     if query and tables:
-                        self.feedback_manager.store_feedback(query, tables, self.schema_dict)
+                        valid_tables, invalid_tables = self.table_identifier.validate_tables(tables)
+                        if invalid_tables:
+                            print(f"Invalid tables: {', '.join(invalid_tables)}")
+                            continue
+                        self.feedback_manager.store_feedback(query, valid_tables, self.schema_dict)
                         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
                         embedding = self.model.encode(query, show_progress_bar=False) if self.model else None
-                        self.cache_synchronizer.write_feedback(timestamp, query, tables, embedding)
-                        print(f"Feedback added: {query} -> {tables}")
+                        self.cache_synchronizer.write_feedback(timestamp, query, valid_tables, embedding)
+                        self.table_identifier.update_weights_from_feedback(query, valid_tables)
+                        self.table_identifier.save_name_matches()
+                        print(f"Feedback added: {query} -> {valid_tables}")
                         self.logger.debug(f"Added feedback: {query}")
                     else:
                         print("Query and tables cannot be empty.")
@@ -871,3 +930,7 @@ class DatabaseAnalyzerCLI:
             self.logger.info("Cleanup completed")
         except Exception as e:
             self.logger.error(f"Error during cleanup: {e}")
+
+if __name__ == "__main__":
+    cli = DatabaseAnalyzerCLI(db_name="BikeStores")
+    cli.run()

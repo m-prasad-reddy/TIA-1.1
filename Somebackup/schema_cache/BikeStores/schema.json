@@ -1,0 +1,883 @@
+{
+  "database": "BikeStores",
+  "schemas": {
+    "dbo": {
+      "id": 1,
+      "tables": [
+        "sysdiagrams"
+      ]
+    },
+    "production": {
+      "id": 5,
+      "tables": [
+        "categories",
+        "brands",
+        "products",
+        "stocks"
+      ]
+    },
+    "sales": {
+      "id": 6,
+      "tables": [
+        "customers",
+        "stores",
+        "staffs",
+        "orders",
+        "order_items"
+      ]
+    },
+    "hr": {
+      "id": 7,
+      "tables": [
+        "candidates",
+        "employees"
+      ]
+    }
+  },
+  "tables": {
+    "production": {
+      "categories": {
+        "id": 901578250,
+        "columns": [
+          "category_id",
+          "category_name"
+        ]
+      },
+      "brands": {
+        "id": 933578364,
+        "columns": [
+          "brand_id",
+          "brand_name"
+        ]
+      },
+      "products": {
+        "id": 965578478,
+        "columns": [
+          "product_id",
+          "product_name",
+          "brand_id",
+          "category_id",
+          "model_year",
+          "list_price"
+        ]
+      },
+      "stocks": {
+        "id": 1333579789,
+        "columns": [
+          "store_id",
+          "product_id",
+          "quantity"
+        ]
+      }
+    },
+    "sales": {
+      "customers": {
+        "id": 1029578706,
+        "columns": [
+          "customer_id",
+          "first_name",
+          "last_name",
+          "phone",
+          "email",
+          "street",
+          "city",
+          "state",
+          "zip_code"
+        ]
+      },
+      "stores": {
+        "id": 1061578820,
+        "columns": [
+          "store_id",
+          "store_name",
+          "phone",
+          "email",
+          "street",
+          "city",
+          "state",
+          "zip_code"
+        ]
+      },
+      "staffs": {
+        "id": 1093578934,
+        "columns": [
+          "staff_id",
+          "first_name",
+          "last_name",
+          "email",
+          "phone",
+          "active",
+          "store_id",
+          "manager_id"
+        ]
+      },
+      "orders": {
+        "id": 1173579219,
+        "columns": [
+          "order_id",
+          "customer_id",
+          "order_status",
+          "order_date",
+          "required_date",
+          "shipped_date",
+          "store_id",
+          "staff_id"
+        ]
+      },
+      "order_items": {
+        "id": 1253579504,
+        "columns": [
+          "order_id",
+          "item_id",
+          "product_id",
+          "quantity",
+          "list_price",
+          "discount"
+        ]
+      }
+    },
+    "dbo": {
+      "sysdiagrams": {
+        "id": 1413580074,
+        "columns": [
+          "name",
+          "principal_id",
+          "diagram_id",
+          "version",
+          "definition"
+        ]
+      }
+    },
+    "hr": {
+      "candidates": {
+        "id": 1637580872,
+        "columns": [
+          "id",
+          "fullname"
+        ]
+      },
+      "employees": {
+        "id": 1669580986,
+        "columns": [
+          "id",
+          "fullname"
+        ]
+      }
+    }
+  },
+  "columns": {
+    "production": {
+      "categories": {
+        "category_id": {
+          "id": 1,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": true,
+          "description": "",
+          "is_primary_key": true
+        },
+        "category_name": {
+          "id": 2,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        }
+      },
+      "brands": {
+        "brand_id": {
+          "id": 1,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": true,
+          "description": "",
+          "is_primary_key": true
+        },
+        "brand_name": {
+          "id": 2,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        }
+      },
+      "products": {
+        "product_id": {
+          "id": 1,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": true,
+          "description": "",
+          "is_primary_key": true
+        },
+        "product_name": {
+          "id": 2,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": "name of the product"
+        },
+        "brand_id": {
+          "id": 3,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "category_id": {
+          "id": 4,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "model_year": {
+          "id": 5,
+          "type": "smallint",
+          "max_length": 2,
+          "precision": 5,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "list_price": {
+          "id": 6,
+          "type": "decimal",
+          "max_length": 9,
+          "precision": 10,
+          "scale": 2,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        }
+      },
+      "stocks": {
+        "store_id": {
+          "id": 1,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": "",
+          "is_primary_key": true
+        },
+        "product_id": {
+          "id": 2,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": "",
+          "is_primary_key": true
+        },
+        "quantity": {
+          "id": 3,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        }
+      }
+    },
+    "sales": {
+      "customers": {
+        "customer_id": {
+          "id": 1,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": true,
+          "description": "",
+          "is_primary_key": true
+        },
+        "first_name": {
+          "id": 2,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": "first name of customers"
+        },
+        "last_name": {
+          "id": 3,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": "last name of customers"
+        },
+        "phone": {
+          "id": 4,
+          "type": "varchar",
+          "max_length": 25,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": "customers phone number"
+        },
+        "email": {
+          "id": 5,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": "customers email"
+        },
+        "street": {
+          "id": 6,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": "customers street address"
+        },
+        "city": {
+          "id": 7,
+          "type": "varchar",
+          "max_length": 50,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": "customers city"
+        },
+        "state": {
+          "id": 8,
+          "type": "varchar",
+          "max_length": 25,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": "customers state"
+        },
+        "zip_code": {
+          "id": 9,
+          "type": "varchar",
+          "max_length": 5,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": "customers zip code"
+        }
+      },
+      "stores": {
+        "store_id": {
+          "id": 1,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": true,
+          "description": "",
+          "is_primary_key": true
+        },
+        "store_name": {
+          "id": 2,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "phone": {
+          "id": 3,
+          "type": "varchar",
+          "max_length": 25,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        },
+        "email": {
+          "id": 4,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        },
+        "street": {
+          "id": 5,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        },
+        "city": {
+          "id": 6,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        },
+        "state": {
+          "id": 7,
+          "type": "varchar",
+          "max_length": 10,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        },
+        "zip_code": {
+          "id": 8,
+          "type": "varchar",
+          "max_length": 5,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        }
+      },
+      "staffs": {
+        "staff_id": {
+          "id": 1,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": true,
+          "description": "",
+          "is_primary_key": true
+        },
+        "first_name": {
+          "id": 2,
+          "type": "varchar",
+          "max_length": 50,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "last_name": {
+          "id": 3,
+          "type": "varchar",
+          "max_length": 50,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "email": {
+          "id": 4,
+          "type": "varchar",
+          "max_length": 255,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "phone": {
+          "id": 5,
+          "type": "varchar",
+          "max_length": 25,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        },
+        "active": {
+          "id": 6,
+          "type": "tinyint",
+          "max_length": 1,
+          "precision": 3,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "store_id": {
+          "id": 7,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "manager_id": {
+          "id": 8,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        }
+      },
+      "orders": {
+        "order_id": {
+          "id": 1,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": true,
+          "description": "",
+          "is_primary_key": true
+        },
+        "customer_id": {
+          "id": 2,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        },
+        "order_status": {
+          "id": 3,
+          "type": "tinyint",
+          "max_length": 1,
+          "precision": 3,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "order_date": {
+          "id": 4,
+          "type": "date",
+          "max_length": 3,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "required_date": {
+          "id": 5,
+          "type": "date",
+          "max_length": 3,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "shipped_date": {
+          "id": 6,
+          "type": "date",
+          "max_length": 3,
+          "precision": 10,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        },
+        "store_id": {
+          "id": 7,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "staff_id": {
+          "id": 8,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        }
+      },
+      "order_items": {
+        "order_id": {
+          "id": 1,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": "",
+          "is_primary_key": true
+        },
+        "item_id": {
+          "id": 2,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": "",
+          "is_primary_key": true
+        },
+        "product_id": {
+          "id": 3,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "quantity": {
+          "id": 4,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "list_price": {
+          "id": 5,
+          "type": "decimal",
+          "max_length": 9,
+          "precision": 10,
+          "scale": 2,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "discount": {
+          "id": 6,
+          "type": "decimal",
+          "max_length": 5,
+          "precision": 4,
+          "scale": 2,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        }
+      }
+    },
+    "dbo": {
+      "sysdiagrams": {
+        "name": {
+          "id": 1,
+          "type": "sysname",
+          "max_length": 256,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "principal_id": {
+          "id": 2,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        },
+        "diagram_id": {
+          "id": 3,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": true,
+          "description": "",
+          "is_primary_key": true
+        },
+        "version": {
+          "id": 4,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        },
+        "definition": {
+          "id": 5,
+          "type": "varbinary",
+          "max_length": -1,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true,
+          "identity": false,
+          "description": ""
+        }
+      }
+    },
+    "hr": {
+      "candidates": {
+        "id": {
+          "id": 1,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": true,
+          "description": "",
+          "is_primary_key": true
+        },
+        "fullname": {
+          "id": 2,
+          "type": "varchar",
+          "max_length": 100,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        }
+      },
+      "employees": {
+        "id": {
+          "id": 1,
+          "type": "int",
+          "max_length": 4,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false,
+          "identity": true,
+          "description": "",
+          "is_primary_key": true
+        },
+        "fullname": {
+          "id": 2,
+          "type": "varchar",
+          "max_length": 100,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false,
+          "identity": false,
+          "description": ""
+        }
+      }
+    }
+  },
+  "relationships": [
+    {
+      "from": "production.products.category_id",
+      "to": "production.categories.category_id",
+      "cross_schema": false
+    },
+    {
+      "from": "production.products.brand_id",
+      "to": "production.brands.brand_id",
+      "cross_schema": false
+    },
+    {
+      "from": "sales.order_items.product_id",
+      "to": "production.products.product_id",
+      "cross_schema": true
+    },
+    {
+      "from": "production.stocks.product_id",
+      "to": "production.products.product_id",
+      "cross_schema": false
+    },
+    {
+      "from": "sales.orders.customer_id",
+      "to": "sales.customers.customer_id",
+      "cross_schema": false
+    },
+    {
+      "from": "sales.staffs.store_id",
+      "to": "sales.stores.store_id",
+      "cross_schema": false
+    },
+    {
+      "from": "sales.orders.store_id",
+      "to": "sales.stores.store_id",
+      "cross_schema": false
+    },
+    {
+      "from": "production.stocks.store_id",
+      "to": "sales.stores.store_id",
+      "cross_schema": true
+    },
+    {
+      "from": "sales.staffs.manager_id",
+      "to": "sales.staffs.staff_id",
+      "cross_schema": false
+    },
+    {
+      "from": "sales.orders.staff_id",
+      "to": "sales.staffs.staff_id",
+      "cross_schema": false
+    },
+    {
+      "from": "sales.order_items.order_id",
+      "to": "sales.orders.order_id",
+      "cross_schema": false
+    }
+  ]
+}

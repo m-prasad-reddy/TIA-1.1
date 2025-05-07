@@ -1,5 +1,5 @@
 # analysis/name_match_manager.py: Manages name matches and synonyms for TableIdentifier-v2.1
-# Fixed list.remove error with set and enhanced synonym matching
+# Enhanced synonym scoring and feedback learning
 
 import os
 import json
@@ -38,9 +38,9 @@ class NameMatchManager:
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 handlers=[
                     logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
-                    logging.StreamHandler()
-                ]
-            )
+                        logging.StreamHandler()
+                    ]
+                )
             logging.error(f"Error loading logging config: {e}")
         
         self.logger = logging.getLogger("name_match_manager")
@@ -64,7 +64,7 @@ class NameMatchManager:
             "name": ["first_name", "last_name", "product_name", "store_name", "brand_name", "category_name"],
             "customer": ["customer_id"],
             "product": ["product_id"],
-            "store": ["store_id"],
+            "store": ["store_id", "store_name"],
             "category": ["category_name"],
             "order": ["order_id"]
         }
@@ -229,13 +229,17 @@ class NameMatchManager:
                         col_lower = col.lower()
                         score = 0.0
                         if col_lower in synonyms:
-                            score += 0.2 * len(synonyms[col_lower])  # Increased weight for synonyms
-                            if any(syn in self.predefined_synonyms for syn in synonyms[col_lower]):
+                            score += 0.2 * len(synonyms[col_lower])  # Base score for synonyms
+                            matched_synonyms = synonyms[col_lower]
+                            if any(syn in self.predefined_synonyms for syn in matched_synonyms):
                                 score += 0.1  # Boost for predefined synonyms
+                            if any(syn in self.dynamic_matches.get(col_lower, []) for syn in matched_synonyms):
+                                score += 0.15  # Increased boost for dynamic synonyms
                             if col_lower.endswith('_id'):
                                 score += 0.05
                             if col_lower in schema_dict['primary_keys'].get(schema, {}).get(table, []):
                                 score += 0.1
+                            self.logger.debug(f"Scoring '{col_lower}': {matched_synonyms}, score={score:.2f}")
                         scores[f"{schema}.{table}.{col_lower}"] = score
                         self.logger.debug(f"Column score for '{col_lower}': {score:.2f}")
             return scores
@@ -247,7 +251,7 @@ class NameMatchManager:
         """Save dynamic matches to SQLite."""
         try:
             for col in self.dynamic_matches:
-                self.dynamic_matches[col] = list(dict.fromkeys(self.dynamic_matches[col]))
+                self.dynamic_matches[col] = list(set(self.dynamic_matches[col]))  # Deduplicate
             self.cache_synchronizer.write_name_matches(self.dynamic_matches, 'dynamic')
             self.logger.debug("Saved dynamic matches to SQLite")
         except Exception as e:
@@ -258,7 +262,7 @@ class NameMatchManager:
         """Save all matches to SQLite."""
         try:
             for col in self.default_matches:
-                self.default_matches[col] = list(dict.fromkeys(self.default_matches[col]))
+                self.default_matches[col] = list(set(self.default_matches[col]))  # Deduplicate
             self.cache_synchronizer.write_name_matches(self.default_matches, 'default')
             self._save_dynamic_matches()
             self.logger.debug("Saved all name matches to SQLite")
