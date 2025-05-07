@@ -1,5 +1,5 @@
 # main.py: Entry point for Database Schema Analyzer
-# Fixes PatternManager instantiation, retains ~305 lines
+# Updated to support new database_configurations.json format with schemas/tables
 
 import logging
 import logging.config
@@ -43,9 +43,9 @@ class DatabaseAnalyzer:
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 handlers=[
                     logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
-                        logging.StreamHandler()
-                    ]
-                )
+                    logging.StreamHandler()
+                ]
+            )
             logging.error(f"Error loading logging config: {e}")
         
         self.logger = logging.getLogger("analyzer")
@@ -94,7 +94,9 @@ class DatabaseAnalyzer:
             cli = DatabaseAnalyzerCLI(
                 self.current_config['database'],
                 schema_dict=self.schema_dict,
-                feedback_manager=self.feedback_manager
+                feedback_manager=self.feedback_manager,
+                schemas=self.current_config.get('schemas', []),
+                tables=self.current_config.get('tables', [])
             )
             cli.run()
             
@@ -113,6 +115,20 @@ class DatabaseAnalyzer:
                 self.logger.warning(f"Config file not found at {config_path}")
                 config_path = input("Enter config file path: ").strip()
             configs = self.config_manager.load_configs(config_path)
+            for config in configs:
+                # Validate schemas and tables
+                config['schemas'] = config.get('schemas', [])
+                config['tables'] = config.get('tables', [])
+                if not isinstance(config['schemas'], list):
+                    self.logger.warning(f"Invalid schemas format in {config['name']}: expected list")
+                    config['schemas'] = []
+                if not isinstance(config['tables'], list):
+                    self.logger.warning(f"Invalid tables format in {config['name']}: expected list")
+                    config['tables'] = []
+                for table in config['tables']:
+                    if '.' not in table:
+                        self.logger.warning(f"Invalid table format in {config['name']}: {table} (expected schema.table)")
+                        config['tables'].remove(table)
             self.logger.debug(f"Loaded {len(configs)} configurations")
             return configs
         except Exception as e:
@@ -148,7 +164,7 @@ class DatabaseAnalyzer:
         db_name = self.current_config['database']
         self.logger.debug(f"Initializing managers for {db_name}")
         try:
-            self.schema_manager = SchemaManager(db_name)
+            self.schema_manager = SchemaManager(db_name, self.current_config.get('schemas', []), self.current_config.get('tables', []))
             
             metadata_initializer = MetadataInitializer(db_name, self.schema_manager, self.connection_manager)
             if not metadata_initializer.initialize():
@@ -162,7 +178,7 @@ class DatabaseAnalyzer:
                 self.schema_dict = self.schema_manager.load_from_cache()
             
             self.cache_synchronizer = CacheSynchronizer(db_name)
-            self.pattern_manager = PatternManager(self.schema_dict)
+            self.pattern_manager = PatternManager(self.schema_dict, self.current_config.get('schemas', []), self.current_config.get('tables', []))
             self.feedback_manager = FeedbackManager(db_name, self.cache_synchronizer)
             self.nlp_pipeline = NLPPipeline(self.pattern_manager, db_name)
             self.name_matcher = NameMatchManager(db_name)
@@ -195,7 +211,7 @@ class DatabaseAnalyzer:
         try:
             self.logger.debug("Rebuilding schema")
             self.schema_dict = self.schema_manager.build_data_dict(self.connection_manager.connection)
-            self.pattern_manager = PatternManager(self.schema_dict)
+            self.pattern_manager = PatternManager(self.schema_dict, self.current_config.get('schemas', []), self.current_config.get('tables', []))
             self.feedback_manager = FeedbackManager(self.current_config['database'], self.cache_synchronizer)
             self.nlp_pipeline = NLPPipeline(self.pattern_manager, self.current_config['database'])
             self.name_matcher = NameMatchManager(self.current_config['database'])

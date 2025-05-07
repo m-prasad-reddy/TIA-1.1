@@ -1,0 +1,32 @@
+{
+  "tables": {
+    "hr": [],
+    "production": [],
+    "sales": []
+  },
+  "columns": {
+    "hr": {},
+    "production": {},
+    "sales": {}
+  },
+  "primary_keys": {
+    "hr": {},
+    "production": {},
+    "sales": {}
+  },
+  "foreign_keys": {
+    "hr": {},
+    "production": {},
+    "sales": {}
+  },
+  "views": {
+    "hr": [],
+    "production": [],
+    "sales": []
+  },
+  "indexes": {
+    "hr": {},
+    "production": {},
+    "sales": {}
+  }
+}

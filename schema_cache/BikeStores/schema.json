@@ -1,15 +1,5 @@
 {
   "tables": {
-    "db_accessadmin": [],
-    "db_backupoperator": [],
-    "db_datareader": [],
-    "db_datawriter": [],
-    "db_ddladmin": [],
-    "db_denydatareader": [],
-    "db_denydatawriter": [],
-    "db_owner": [],
-    "db_securityadmin": [],
-    "guest": [],
     "hr": [
       "candidates",
       "employees"
@@ -29,16 +19,6 @@
     ]
   },
   "columns": {
-    "db_accessadmin": {},
-    "db_backupoperator": {},
-    "db_datareader": {},
-    "db_datawriter": {},
-    "db_ddladmin": {},
-    "db_denydatareader": {},
-    "db_denydatawriter": {},
-    "db_owner": {},
-    "db_securityadmin": {},
-    "guest": {},
     "hr": {
       "candidates": {
         "id": {
@@ -362,16 +342,6 @@
     }
   },
   "primary_keys": {
-    "db_accessadmin": {},
-    "db_backupoperator": {},
-    "db_datareader": {},
-    "db_datawriter": {},
-    "db_ddladmin": {},
-    "db_denydatareader": {},
-    "db_denydatawriter": {},
-    "db_owner": {},
-    "db_securityadmin": {},
-    "guest": {},
     "hr": {
       "candidates": [
         "id"
@@ -415,16 +385,6 @@
     }
   },
   "foreign_keys": {
-    "db_accessadmin": {},
-    "db_backupoperator": {},
-    "db_datareader": {},
-    "db_datawriter": {},
-    "db_ddladmin": {},
-    "db_denydatareader": {},
-    "db_denydatawriter": {},
-    "db_owner": {},
-    "db_securityadmin": {},
-    "guest": {},
     "hr": {},
     "production": {
       "products": [
@@ -508,18 +468,50 @@
     }
   },
   "views": {
-    "db_accessadmin": [],
-    "db_backupoperator": [],
-    "db_datareader": [],
-    "db_datawriter": [],
-    "db_ddladmin": [],
-    "db_denydatareader": [],
-    "db_denydatawriter": [],
-    "db_owner": [],
-    "db_securityadmin": [],
-    "guest": [],
     "hr": [],
     "production": [],
     "sales": []
+  },
+  "indexes": {
+    "hr": {
+      "candidates": [
+        "PK__candidat__3213E83F6A385E79"
+      ],
+      "employees": [
+        "PK__employee__3213E83F31AE8989"
+      ]
+    },
+    "production": {
+      "categories": [
+        "PK__categori__D54EE9B444E69120"
+      ],
+      "brands": [
+        "PK__brands__5E5A8E278D0ED369"
+      ],
+      "products": [
+        "PK__products__47027DF58131DCD4"
+      ],
+      "stocks": [
+        "PK__stocks__E68284D36B1CDE5F"
+      ]
+    },
+    "sales": {
+      "customers": [
+        "PK__customer__CD65CB85FCA4AA5E"
+      ],
+      "stores": [
+        "PK__stores__A2F2A30CE954D612"
+      ],
+      "staffs": [
+        "PK__staffs__1963DD9C07623F77",
+        "UQ__staffs__AB6E6164EB653B25"
+      ],
+      "orders": [
+        "PK__orders__46596229BB08BD29"
+      ],
+      "order_items": [
+        "PK__order_it__837942D4C6A06D12"
+      ]
+    }
   }
 }

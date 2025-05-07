@@ -1,5 +1,5 @@
-# feedback/manager.py: Manages feedback for TableIdentifier-v1
-# Original file, fully functional with validation and embeddings, ~167 lines
+# feedback/manager.py: Manages feedback for TIA-1.1
+# Fixed confidence parameter issue in write_feedback calls
 
 import os
 import json
@@ -11,9 +11,10 @@ import numpy as np
 from datetime import datetime
 from sentence_transformers import util
 from config.model_singleton import ModelSingleton
+import sqlite3
 
 class FeedbackManager:
-    """Manages feedback for query-table associations in TableIdentifier-v1."""
+    """Manages feedback for query-table associations in TIA-1.1."""
     
     def __init__(self, db_name: str, cache_synchronizer: Optional[CacheSynchronizer] = None):
         """Initialize with database name and optional cache synchronizer."""
@@ -54,8 +55,8 @@ class FeedbackManager:
         self.model = ModelSingleton().model
         self.logger.debug(f"Initialized FeedbackManager for {db_name}")
 
-    def store_feedback(self, query: str, tables: List[str], schema_dict: Optional[Dict] = None):
-        """Store feedback for a query and its identified tables."""
+    def store_feedback(self, query: str, tables: List[str], schema_dict: Optional[Dict] = None, confidence: float = 0.9):
+        """Store feedback for a query and its identified tables with confidence."""
         try:
             if not query or not tables:
                 self.logger.error("Empty query or tables provided")
@@ -92,8 +93,8 @@ class FeedbackManager:
             # Store in SQLite
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             self.cache_synchronizer.write_feedback(timestamp, query, tables, embedding, count=1)
-            self.feedback[timestamp] = {'query': query, 'tables': tables, 'count': 1}
-            self.logger.debug(f"Stored feedback: {query} -> {tables}")
+            self.feedback[timestamp] = {'query': query, 'tables': tables, 'count': 1, 'confidence': confidence}
+            self.logger.debug(f"Stored feedback: {query} -> {tables}, confidence={confidence:.2f}")
         except Exception as e:
             self.logger.error(f"Error storing feedback for query '{query}': {e}")
 
@@ -106,7 +107,8 @@ class FeedbackManager:
                     'timestamp': ts,
                     'query': data['query'],
                     'tables': data['tables'],
-                    'count': data['count']
+                    'count': data['count'],
+                    'confidence': self.feedback.get(ts, {}).get('confidence', 0.9)
                 }
                 for ts, data in feedback_data.items()
             ]
@@ -116,19 +118,24 @@ class FeedbackManager:
             self.logger.error(f"Error retrieving feedback: {e}")
             return []
 
-    def get_top_queries(self, limit: int = 5) -> List[str]:
+    def get_top_queries(self, limit: int = 5) -> List[Dict]:
         """Get top example queries based on feedback frequency."""
         try:
             feedback_data = self.cache_synchronizer.read_feedback()
-            query_counts = {}
-            for data in feedback_data.values():
+            query_table_counts = {}
+            for ts, data in feedback_data.items():
                 query = data['query']
+                tables = data['tables']
                 count = data.get('count', 1)
-                query_counts[query] = query_counts.get(query, 0) + count
+                key = (query, tuple(sorted(tables)))
+                query_table_counts[key] = query_table_counts.get(key, 0) + count
             
-            sorted_queries = sorted(query_counts.items(), key=lambda x: x[1], reverse=True)
-            top_queries = [query for query, _ in sorted_queries[:limit]]
-            self.logger.debug(f"Retrieved top {len(top_queries)} queries")
+            sorted_entries = sorted(query_table_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+            top_queries = [
+                {'query': query, 'tables': list(tables)}
+                for (query, tables), _ in sorted_entries
+            ]
+            self.logger.debug(f"Retrieved top {len(top_queries)} queries: {top_queries}")
             return top_queries
         except Exception as e:
             self.logger.error(f"Error retrieving top queries: {e}")
@@ -141,6 +148,7 @@ class FeedbackManager:
             for ts, data in list(feedback_data.items()):
                 if data['query'].lower() == query.lower():
                     del feedback_data[ts]
+                    self.feedback.pop(ts, None)
                     self.logger.debug(f"Deleted feedback for query: {query}")
             
             # Update SQLite

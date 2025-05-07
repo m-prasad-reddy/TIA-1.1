@@ -1,5 +1,5 @@
-# config/metadata_initializer.py: Initializes metadata caches for TableIdentifier-v1
-# Fixes file migration error for query_synonyms.json.bak, retains ~375 lines
+# config/metadata_initializer.py: Initializes metadata caches for TableIdentifier-v2.1
+# Restored detailed synonym generation and feedback, fixed .bak migration
 
 import os
 import json
@@ -16,7 +16,7 @@ from config.manager import DatabaseConnection
 from config.cache_synchronizer import CacheSynchronizer
 
 class MetadataInitializer:
-    """Initializes metadata caches for TableIdentifier-v1 first launch."""
+    """Initializes metadata caches for TableIdentifier-v2.1 first launch."""
     
     def __init__(self, db_name: str, schema_manager: SchemaManager, connection_manager: DatabaseConnection):
         os.makedirs("logs", exist_ok=True)
@@ -184,7 +184,9 @@ class MetadataInitializer:
                             col_lower,
                             col_lower.replace('_', ' '),
                             col_lower.replace('_', ''),
-                            ' '.join(token.lemma_ for token in self.nlp(col_lower))
+                            ' '.join(token.lemma_ for token in self.nlp(col_lower)),
+                            col_lower.replace('id', 'identifier'),
+                            col_lower.replace('date', 'time')
                         ]
                         for var in variations:
                             if not var or var == col_lower:
@@ -199,6 +201,10 @@ class MetadataInitializer:
                         if table_similarity > self.synonym_threshold - 0.1:
                             synonyms.append(table.lower())
                             self.logger.debug(f"Added table synonym '{table.lower()}' for '{col_lower}' (sim={table_similarity:.2f})")
+                        if col_lower.endswith('_id'):
+                            synonyms.append(col_lower[:-3])
+                            synonyms.append(table.lower() + '_name')
+                            self.logger.debug(f"Added ID synonyms for '{col_lower}'")
                         if synonyms:
                             matches[col_lower] = list(set(synonyms))
             return matches
@@ -219,7 +225,9 @@ class MetadataInitializer:
                     queries.extend([
                         f"List all {table_name}",
                         f"Show all {table_name}",
-                        f"Get {table_name} details"
+                        f"Get {table_name} details",
+                        f"Count {table_name}",
+                        f"Find {table_name} records"
                     ])
                     for col in schema_dict['columns'][schema][table]:
                         col_lower = col.lower()
@@ -228,7 +236,9 @@ class MetadataInitializer:
                             f"List {table_name} with {col_lower}",
                             f"Find {table_name} by {col_lower}",
                             f"Get {table_name} where {col_lower}",
-                            f"Select {col_lower} in {table_name}"
+                            f"Select {col_lower} in {table_name}",
+                            f"Count {table_name} by {col_lower}",
+                            f"Sum {col_lower} in {table_name}"
                         ])
                         self.logger.debug(f"Generated query: {queries[-1]}")
                         col_embedding = self.model.encode(col_lower, show_progress_bar=False).reshape(1, -1)
@@ -236,7 +246,10 @@ class MetadataInitializer:
                         variations = [
                             col_lower.replace('_', ' '),
                             col_lower.replace('_', ''),
-                            ' '.join(token.lemma_ for token in self.nlp(col_lower))
+                            ' '.join(token.lemma_ for token in self.nlp(col_lower)),
+                            col_lower.replace('id', 'identifier'),
+                            col_lower.replace('date', 'time'),
+                            table_name + '_' + col_lower
                         ]
                         for var in variations:
                             if not var or var == col_lower:
@@ -251,6 +264,9 @@ class MetadataInitializer:
                         if table_similarity > self.synonym_threshold - 0.1:
                             col_synonyms.append(table_name)
                             self.logger.debug(f"Added table synonym '{table_name}' for '{col_lower}' (sim={table_similarity:.2f})")
+                        if col_lower.endswith('_id'):
+                            col_synonyms.append(col_lower[:-3])
+                            col_synonyms.append(table_name + '_name')
                         if col_synonyms:
                             synonyms[col_lower] = list(set(col_synonyms))
             
@@ -274,14 +290,18 @@ class MetadataInitializer:
                     queries = [
                         f"List all {table_name}",
                         f"Show all {table_name}",
-                        f"Get {table_name} details"
+                        f"Get {table_name} details",
+                        f"Count {table_name}",
+                        f"Find {table_name} records"
                     ]
                     for col in schema_dict['columns'][schema][table]:
                         col_lower = col.lower()
                         queries.extend([
                             f"{table_name} with {col_lower}",
                             f"{table_name} in {col_lower}",
-                            f"Find {table_name} by {col_lower}"
+                            f"Find {table_name} by {col_lower}",
+                            f"Count {table_name} by {col_lower}",
+                            f"Sum {col_lower} in {table_name}"
                         ])
                     for query in queries:
                         try:
@@ -292,10 +312,31 @@ class MetadataInitializer:
                         except Exception as e:
                             self.logger.error(f"Error creating feedback for query '{query}': {e}")
                             continue
+                    # Multi-table feedback for related tables
+                    related_tables = self._find_related_tables(schema_dict, schema, table)
+                    if related_tables:
+                        query = f"Join {table_name} with {related_tables[0].split('.')[-1]}"
+                        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                        embedding = self.model.encode(query, show_progress_bar=False)
+                        self.cache_synchronizer.write_feedback(timestamp, query, [table_full, related_tables[0]], embedding, count=1)
+                        self.logger.debug(f"Created multi-table feedback: {query}")
             return True
         except Exception as e:
             self.logger.error(f"Error building synthetic feedback: {e}")
             return False
+
+    def _find_related_tables(self, schema_dict: Dict, schema: str, table: str) -> List[str]:
+        try:
+            related = []
+            foreign_keys = schema_dict['foreign_keys'].get(schema, {}).get(table, [])
+            for fk in foreign_keys:
+                ref_table = f"{fk['referenced_schema']}.{fk['referenced_table']}"
+                if ref_table != f"{schema}.{table}":
+                    related.append(ref_table)
+            return related
+        except Exception as e:
+            self.logger.error(f"Error finding related tables for {schema}.{table}: {e}")
+            return []
 
     def _initialize_ignored_queries(self) -> bool:
         try:
@@ -303,7 +344,8 @@ class MetadataInitializer:
                 {"query": "chitti emchestunnav", "reason": "non-English"},
                 {"query": "what you are doing now?", "reason": "irrelevant"},
                 {"query": "hello how are you", "reason": "irrelevant"},
-                {"query": "hi there", "reason": "irrelevant"}
+                {"query": "hi there", "reason": "irrelevant"},
+                {"query": "test query", "reason": "test"}
             ]
             for item in default_ignored:
                 query = item["query"]
@@ -341,7 +383,6 @@ class MetadataInitializer:
                         if table:
                             self.cache_synchronizer.write_feedback(timestamp, query, [table], embedding)
                             self.logger.debug(f"Migrated query synonym as feedback: {query} -> {table}")
-                    # Handle existing .bak file
                     bak_file = self.query_synonyms_file + ".bak"
                     if os.path.exists(bak_file):
                         self.logger.debug(f"Removing existing backup file: {bak_file}")
@@ -350,6 +391,16 @@ class MetadataInitializer:
                     self.logger.debug(f"Backed up {self.query_synonyms_file} to {bak_file}")
                 except Exception as e:
                     self.logger.warning(f"Error migrating query synonyms: {e}")
+                    return False
+            
+            if os.path.exists(self.default_name_matches_file):
+                try:
+                    with open(self.default_name_matches_file) as f:
+                        name_matches = json.load(f)
+                    self.cache_synchronizer.write_name_matches(name_matches, 'default')
+                    self.logger.debug(f"Migrated default name matches from {self.default_name_matches_file}")
+                except Exception as e:
+                    self.logger.warning(f"Error migrating default name matches: {e}")
                     return False
             
             self.cache_synchronizer.migrate_file_caches()

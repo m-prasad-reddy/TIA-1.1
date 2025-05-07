@@ -1,5 +1,5 @@
-# config/cache_synchronizer.py: Manages cache operations for TableIdentifier-v1
-# Fixes write_ignored_query for np.ndarray embeddings, preserves ~512 lines
+# config/cache_synchronizer.py: Manages cache operations for TableIdentifier-v2.1
+# Restored cache validation, migration, and feedback similarity checks
 
 import os
 import sqlite3
@@ -456,9 +456,58 @@ class CacheSynchronizer:
     def migrate_file_caches(self):
         """
         Migrate legacy file-based caches to SQLite.
-        Currently a placeholder for compatibility with existing calls.
         """
         try:
+            config_dir = os.path.join("app-config", self.db_name)
+            weights_file = os.path.join(config_dir, "weights.json")
+            name_matches_file = os.path.join(config_dir, "name_matches.json")
+            feedback_file = os.path.join(config_dir, "feedback.json")
+            ignored_file = os.path.join(config_dir, "ignored_queries.json")
+            
+            if os.path.exists(weights_file):
+                try:
+                    with open(weights_file) as f:
+                        weights = json.load(f)
+                    self.write_weights(weights)
+                    os.rename(weights_file, weights_file + ".bak")
+                    self.logger.debug(f"Migrated weights from {weights_file}")
+                except Exception as e:
+                    self.logger.warning(f"Error migrating weights: {e}")
+            
+            if os.path.exists(name_matches_file):
+                try:
+                    with open(name_matches_file) as f:
+                        name_matches = json.load(f)
+                    self.write_name_matches(name_matches)
+                    os.rename(name_matches_file, name_matches_file + ".bak")
+                    self.logger.debug(f"Migrated name matches from {name_matches_file}")
+                except Exception as e:
+                    self.logger.warning(f"Error migrating name matches: {e}")
+            
+            if os.path.exists(feedback_file):
+                try:
+                    with open(feedback_file) as f:
+                        feedback = json.load(f)
+                    for timestamp, entry in feedback.items():
+                        embedding = np.zeros(384, dtype=np.float32)  # Default for old file-based
+                        self.write_feedback(timestamp, entry['query'], entry['tables'], embedding, entry.get('count', 1))
+                    os.rename(feedback_file, feedback_file + ".bak")
+                    self.logger.debug(f"Migrated feedback from {feedback_file}")
+                except Exception as e:
+                    self.logger.warning(f"Error migrating feedback: {e}")
+            
+            if os.path.exists(ignored_file):
+                try:
+                    with open(ignored_file) as f:
+                        ignored = json.load(f)
+                    for query, info in ignored.items():
+                        embedding = np.zeros(384, dtype=np.float32)  # Default for old file-based
+                        self.write_ignored_query(query, embedding, info.get('reason', 'unknown'))
+                    os.rename(ignored_file, ignored_file + ".bak")
+                    self.logger.debug(f"Migrated ignored queries from {ignored_file}")
+                except Exception as e:
+                    self.logger.warning(f"Error migrating ignored queries: {e}")
+            
             self.logger.info("Completed file cache migration to SQLite")
         except Exception as e:
             self.logger.error(f"Error migrating file caches: {e}")
@@ -474,7 +523,11 @@ class CacheSynchronizer:
         """
         try:
             self.logger.debug("Reloading caches")
-            self.clear_cache()
+            self.clear_cache(table='weights')
+            self.clear_cache(table='name_matches')
+            self.clear_cache(table='ignored_queries')
+            # Preserve feedback
+            self.logger.debug("Preserving feedback during cache reload")
             self.logger.info("Caches reloaded successfully")
         except Exception as e:
             self.logger.error(f"Error reloading caches: {e}")
@@ -484,10 +537,10 @@ class CacheSynchronizer:
         Clear specific cache table or all tables.
         
         Args:
-            table: Optional table name to clear (e.g., 'weights', 'feedback'). If None, clears all.
+            table: Optional table name to clear (e.g., 'weights', 'feedback'). If None, clears all except feedback.
         """
         try:
-            tables = ['weights', 'name_matches', 'feedback', 'ignored_queries']
+            tables = ['weights', 'name_matches', 'ignored_queries']
             if table and table in tables:
                 self.cursor.execute(f"DELETE FROM {table}")
                 self.conn.commit()
@@ -496,7 +549,7 @@ class CacheSynchronizer:
                 for t in tables:
                     self.cursor.execute(f"DELETE FROM {t}")
                 self.conn.commit()
-                self.logger.debug("Cleared all cache tables")
+                self.logger.debug("Cleared weights, name_matches, and ignored_queries tables")
         except Exception as e:
             self.logger.error(f"Error clearing cache: {e}")
 
@@ -538,6 +591,35 @@ class CacheSynchronizer:
         except Exception as e:
             self.logger.error(f"Error counting feedback: {e}")
             return 0
+
+    def find_similar_feedback(self, query: str, threshold: float = 0.8) -> List[Tuple[str, List[str], float]]:
+        """
+        Find feedback entries similar to the given query based on embedding similarity.
+        
+        Args:
+            query: Query string to compare.
+            threshold: Similarity threshold for matching (default: 0.8).
+        
+        Returns:
+            List of tuples (query, tables, similarity).
+        """
+        try:
+            if not self.model:
+                self.logger.warning("No model available for similarity comparison")
+                return []
+            query_embedding = self.model.encode(query, show_progress_bar=False)
+            feedback = self.get_feedback()
+            similar = []
+            for _, fb_query, tables, fb_embedding, _ in feedback:
+                similarity = float(util.cos_sim(query_embedding, fb_embedding)[0][0])
+                if similarity > threshold:
+                    similar.append((fb_query, tables, similarity))
+            similar.sort(key=lambda x: x[2], reverse=True)
+            self.logger.debug(f"Found {len(similar)} similar feedback entries for query: {query}")
+            return similar
+        except Exception as e:
+            self.logger.error(f"Error finding similar feedback for query '{query}': {e}")
+            return []
 
     def close(self):
         """

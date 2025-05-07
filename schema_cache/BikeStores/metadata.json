@@ -1,5 +1,11 @@
 {
-  "last_updated": "2025-05-02 00:24:25",
-  "schema_version": "1.1",
-  "db_name": "BikeStores"
+  "last_updated": "2025-05-07 16:26:06",
+  "schema_version": "1.2",
+  "db_name": "BikeStores",
+  "schemas": [
+    "hr",
+    "production",
+    "sales"
+  ],
+  "tables": []
 }

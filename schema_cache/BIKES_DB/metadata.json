@@ -1,0 +1,11 @@
+{
+  "last_updated": "2025-05-07 14:43:22",
+  "schema_version": "1.2",
+  "db_name": "BIKES_DB",
+  "schemas": [
+    "hr",
+    "production",
+    "sales"
+  ],
+  "tables": []
+}
