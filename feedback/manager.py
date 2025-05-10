@@ -1,5 +1,5 @@
-# feedback/manager.py: Manages feedback for TIA-1.1
-# Fixed confidence parameter issue in write_feedback calls
+# feedback/manager.py: Manages feedback for TableIdentifier-v2.1
+# Added update_feedback for deduplication
 
 import os
 import json
@@ -14,14 +14,11 @@ from config.model_singleton import ModelSingleton
 import sqlite3
 
 class FeedbackManager:
-    """Manages feedback for query-table associations in TIA-1.1."""
+    """Manages feedback for query-table associations in TableIdentifier-v2.1."""
     
     def __init__(self, db_name: str, cache_synchronizer: Optional[CacheSynchronizer] = None):
-        """Initialize with database name and optional cache synchronizer."""
-        # Ensure logs directory exists
         os.makedirs("logs", exist_ok=True)
         
-        # Configure logging
         logging_config_path = "app-config/logging_config.ini"
         try:
             if os.path.exists(logging_config_path):
@@ -30,21 +27,13 @@ class FeedbackManager:
                 logging.basicConfig(
                     level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[
-                        logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
-                        logging.StreamHandler()
-                    ]
-                )
+                    handlers=[logging.FileHandler(os.path.join("logs", "bikestores_app.log")), logging.StreamHandler()])
                 logging.warning(f"Logging config file not found: {logging_config_path}")
         except Exception as e:
             logging.basicConfig(
                 level=logging.INFO,
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                handlers=[
-                    logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
-                    logging.StreamHandler()
-                ]
-            )
+                handlers=[logging.FileHandler(os.path.join("logs", "bikestores_app.log")), logging.StreamHandler()])
             logging.error(f"Error loading logging config: {e}")
         
         self.logger = logging.getLogger("feedback")
@@ -62,7 +51,6 @@ class FeedbackManager:
                 self.logger.error("Empty query or tables provided")
                 return
 
-            # Validate tables if schema_dict is provided
             if schema_dict:
                 valid_tables = []
                 schema_map = {s.lower(): s for s in schema_dict.get('tables', {})}
@@ -83,20 +71,43 @@ class FeedbackManager:
                 self.logger.error("No valid tables after validation")
                 return
 
-            # Generate embedding
             try:
                 embedding = self.model.encode(query, show_progress_bar=False)
             except Exception as e:
-                self.logger.error(f"Error generating embedding for query '{query}': {e}")
+                self.logger.error(f"Error generating embedding: {e}")
                 embedding = np.array([])
 
-            # Store in SQLite
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             self.cache_synchronizer.write_feedback(timestamp, query, tables, embedding, count=1)
             self.feedback[timestamp] = {'query': query, 'tables': tables, 'count': 1, 'confidence': confidence}
             self.logger.debug(f"Stored feedback: {query} -> {tables}, confidence={confidence:.2f}")
         except Exception as e:
-            self.logger.error(f"Error storing feedback for query '{query}': {e}")
+            self.logger.error(f"Error storing feedback: {e}")
+
+    def update_feedback(self, timestamp: str, tables: List[str], confidence: float = 0.9):
+        """Update existing feedback with new tables and confidence."""
+        try:
+            if not timestamp or not tables:
+                self.logger.error("Invalid timestamp or tables for update")
+                return
+
+            feedback_data = self.cache_synchronizer.read_feedback()
+            if timestamp not in feedback_data:
+                self.logger.error(f"Feedback not found for timestamp: {timestamp}")
+                return
+
+            query = feedback_data[timestamp]['query']
+            try:
+                embedding = self.model.encode(query, show_progress_bar=False)
+            except Exception as e:
+                self.logger.error(f"Error generating embedding: {e}")
+                embedding = np.array([])
+
+            self.cache_synchronizer.write_feedback(timestamp, query, tables, embedding, count=feedback_data[timestamp]['count'] + 1)
+            self.feedback[timestamp] = {'query': query, 'tables': tables, 'count': feedback_data[timestamp]['count'] + 1, 'confidence': confidence}
+            self.logger.debug(f"Updated feedback {timestamp}: {query} -> {tables}, count={self.feedback[timestamp]['count']}")
+        except Exception as e:
+            self.logger.error(f"Error updating feedback: {e}")
 
     def get_all_feedback(self) -> List[Dict]:
         """Retrieve all feedback entries."""
@@ -135,7 +146,7 @@ class FeedbackManager:
                 {'query': query, 'tables': list(tables)}
                 for (query, tables), _ in sorted_entries
             ]
-            self.logger.debug(f"Retrieved top {len(top_queries)} queries: {top_queries}")
+            self.logger.debug(f"Retrieved top {len(top_queries)} queries")
             return top_queries
         except Exception as e:
             self.logger.error(f"Error retrieving top queries: {e}")
@@ -151,14 +162,13 @@ class FeedbackManager:
                     self.feedback.pop(ts, None)
                     self.logger.debug(f"Deleted feedback for query: {query}")
             
-            # Update SQLite
             with sqlite3.connect(self.cache_synchronizer.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM feedback WHERE query = ?", (query,))
                 conn.commit()
-                self.logger.debug(f"Removed feedback for query '{query}' from SQLite")
+                self.logger.debug(f"Removed feedback for query from SQLite")
         except Exception as e:
-            self.logger.error(f"Error deleting feedback for query '{query}': {e}")
+            self.logger.error(f"Error deleting feedback: {e}")
 
     def clear_feedback(self):
         """Clear all feedback data."""

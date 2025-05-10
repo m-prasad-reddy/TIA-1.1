@@ -1,5 +1,5 @@
 # config/cache_synchronizer.py: Manages cache operations for TableIdentifier-v2.1
-# Restored cache validation, migration, and feedback similarity checks
+# Enhanced with query normalization, feedback deduplication, and improved similarity matching
 
 import os
 import sqlite3
@@ -11,6 +11,7 @@ import numpy as np
 from sentence_transformers import util
 from datetime import datetime
 from config.model_singleton import ModelSingleton
+import re
 
 class CacheSynchronizer:
     """
@@ -47,9 +48,9 @@ class CacheSynchronizer:
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 handlers=[
                     logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
-                    logging.StreamHandler()
-                ]
-            )
+                        logging.StreamHandler()
+                    ]
+                )
             logging.error(f"Error loading logging config: {e}")
         
         self.logger = logging.getLogger("cache_synchronizer")
@@ -109,6 +110,24 @@ class CacheSynchronizer:
         except Exception as e:
             self.logger.error(f"Error initializing database tables: {e}")
             raise
+
+    def normalize_query(self, query: str) -> str:
+        """
+        Normalize query for consistent storage and comparison.
+
+        Args:
+            query: The input query string.
+
+        Returns:
+            Normalized query string.
+        """
+        try:
+            query = re.sub(r'\s+', ' ', query.strip().lower())
+            query = re.sub(r'[^\w\s]', '', query)
+            return query
+        except Exception as e:
+            self.logger.error(f"Error normalizing query '{query}': {e}")
+            return query.lower()
 
     def _embedding_to_blob(self, embedding: Optional[np.ndarray]) -> Optional[bytes]:
         """
@@ -261,7 +280,7 @@ class CacheSynchronizer:
 
     def write_feedback(self, timestamp: str, query: str, tables: List[str], embedding: np.ndarray, count: int = 1):
         """
-        Write feedback to SQLite database.
+        Write feedback to SQLite database, checking for duplicates.
         
         Args:
             timestamp: Timestamp of the feedback.
@@ -271,16 +290,40 @@ class CacheSynchronizer:
             count: Feedback count (default: 1).
         """
         try:
+            normalized_query = self.normalize_query(query)
+            # Check for existing similar feedback
+            similar_feedback = self.find_similar_feedback(query, threshold=0.95)
+            for fb_query, fb_tables, sim in similar_feedback:
+                if sim > 0.95 and set(fb_tables) == set(tables):
+                    self.update_feedback_count(fb_query, increment=count)
+                    self.logger.debug(f"Updated existing feedback for query '{fb_query}' (sim={sim:.2f})")
+                    return
+            
             embedding_blob = self._embedding_to_blob(embedding)
             tables_json = json.dumps(tables)
             self.cursor.execute(
                 "INSERT OR REPLACE INTO feedback (timestamp, query, tables, embedding, count) VALUES (?, ?, ?, ?, ?)",
-                (timestamp, query, tables_json, embedding_blob, count)
+                (timestamp, normalized_query, tables_json, embedding_blob, count)
             )
             self.conn.commit()
-            self.logger.debug(f"Wrote feedback for query: {query}")
+            self.logger.debug(f"Wrote feedback for query: {normalized_query}")
         except Exception as e:
             self.logger.error(f"Error writing feedback for query '{query}': {e}")
+
+    def delete_feedback(self, query: str):
+        """
+        Delete feedback entry from SQLite database.
+        
+        Args:
+            query: Query string to remove.
+        """
+        try:
+            normalized_query = self.normalize_query(query)
+            self.cursor.execute("DELETE FROM feedback WHERE query = ?", (normalized_query,))
+            self.conn.commit()
+            self.logger.debug(f"Deleted feedback for query: {normalized_query}")
+        except Exception as e:
+            self.logger.error(f"Error deleting feedback for query '{query}': {e}")
 
     def get_feedback(self, query: Optional[str] = None) -> List[Tuple[str, str, List[str], np.ndarray, int]]:
         """
@@ -294,9 +337,10 @@ class CacheSynchronizer:
         """
         try:
             if query:
+                normalized_query = self.normalize_query(query)
                 self.cursor.execute(
                     "SELECT timestamp, query, tables, embedding, count FROM feedback WHERE query = ?",
-                    (query,)
+                    (normalized_query,)
                 )
             else:
                 self.cursor.execute("SELECT timestamp, query, tables, embedding, count FROM feedback")
@@ -346,15 +390,16 @@ class CacheSynchronizer:
             increment: Amount to increment the count (default: 1).
         """
         try:
+            normalized_query = self.normalize_query(query)
             self.cursor.execute(
                 "UPDATE feedback SET count = count + ? WHERE query = ?",
-                (increment, query)
+                (increment, normalized_query)
             )
             if self.cursor.rowcount == 0:
-                self.logger.debug(f"No feedback found to update for query: {query}")
+                self.logger.debug(f"No feedback found to update for query: {normalized_query}")
             else:
                 self.conn.commit()
-                self.logger.debug(f"Updated feedback count for query: {query}")
+                self.logger.debug(f"Updated feedback count for query: {normalized_query}")
         except Exception as e:
             self.logger.error(f"Error updating feedback count for query '{query}': {e}")
 
@@ -371,20 +416,21 @@ class CacheSynchronizer:
             if not query or len(query.strip()) < 3:
                 self.logger.debug(f"Skipping invalid query: '{query}' (too short or empty)")
                 return
+            normalized_query = self.normalize_query(query)
             # Generate embedding if None and model is available
             if embedding is None and self.model:
                 try:
-                    embedding = self.model.encode(query, show_progress_bar=False)
+                    embedding = self.model.encode(normalized_query, show_progress_bar=False)
                 except Exception as e:
-                    self.logger.error(f"Error generating embedding for query '{query}': {e}")
+                    self.logger.error(f"Error generating embedding for query '{normalized_query}': {e}")
                     embedding = None
             embedding_blob = self._embedding_to_blob(embedding)
             self.cursor.execute(
                 "INSERT OR REPLACE INTO ignored_queries (query, embedding, reason) VALUES (?, ?, ?)",
-                (query, embedding_blob, reason)
+                (normalized_query, embedding_blob, reason)
             )
             self.conn.commit()
-            self.logger.debug(f"Wrote ignored query: {query}")
+            self.logger.debug(f"Wrote ignored query: {normalized_query}")
         except Exception as e:
             self.logger.error(f"Error writing ignored query '{query}': {e}")
 
@@ -415,9 +461,10 @@ class CacheSynchronizer:
             query: Query string to remove.
         """
         try:
-            self.cursor.execute("DELETE FROM ignored_queries WHERE query = ?", (query,))
+            normalized_query = self.normalize_query(query)
+            self.cursor.execute("DELETE FROM ignored_queries WHERE query = ?", (normalized_query,))
             self.conn.commit()
-            self.logger.debug(f"Deleted ignored query: {query}")
+            self.logger.debug(f"Deleted ignored query: {normalized_query}")
         except Exception as e:
             self.logger.error(f"Error deleting ignored query '{query}': {e}")
 
@@ -489,8 +536,9 @@ class CacheSynchronizer:
                     with open(feedback_file) as f:
                         feedback = json.load(f)
                     for timestamp, entry in feedback.items():
+                        normalized_query = self.normalize_query(entry['query'])
                         embedding = np.zeros(384, dtype=np.float32)  # Default for old file-based
-                        self.write_feedback(timestamp, entry['query'], entry['tables'], embedding, entry.get('count', 1))
+                        self.write_feedback(timestamp, normalized_query, entry['tables'], embedding, entry.get('count', 1))
                     os.rename(feedback_file, feedback_file + ".bak")
                     self.logger.debug(f"Migrated feedback from {feedback_file}")
                 except Exception as e:
@@ -501,8 +549,9 @@ class CacheSynchronizer:
                     with open(ignored_file) as f:
                         ignored = json.load(f)
                     for query, info in ignored.items():
+                        normalized_query = self.normalize_query(query)
                         embedding = np.zeros(384, dtype=np.float32)  # Default for old file-based
-                        self.write_ignored_query(query, embedding, info.get('reason', 'unknown'))
+                        self.write_ignored_query(normalized_query, embedding, info.get('reason', 'unknown'))
                     os.rename(ignored_file, ignored_file + ".bak")
                     self.logger.debug(f"Migrated ignored queries from {ignored_file}")
                 except Exception as e:
@@ -592,13 +641,13 @@ class CacheSynchronizer:
             self.logger.error(f"Error counting feedback: {e}")
             return 0
 
-    def find_similar_feedback(self, query: str, threshold: float = 0.8) -> List[Tuple[str, List[str], float]]:
+    def find_similar_feedback(self, query: str, threshold: float = 0.7) -> List[Tuple[str, List[str], float]]:
         """
         Find feedback entries similar to the given query based on embedding similarity.
         
         Args:
             query: Query string to compare.
-            threshold: Similarity threshold for matching (default: 0.8).
+            threshold: Similarity threshold for matching (default: 0.7 for better generalization).
         
         Returns:
             List of tuples (query, tables, similarity).
@@ -607,7 +656,8 @@ class CacheSynchronizer:
             if not self.model:
                 self.logger.warning("No model available for similarity comparison")
                 return []
-            query_embedding = self.model.encode(query, show_progress_bar=False)
+            normalized_query = self.normalize_query(query)
+            query_embedding = self.model.encode(normalized_query, show_progress_bar=False)
             feedback = self.get_feedback()
             similar = []
             for _, fb_query, tables, fb_embedding, _ in feedback:
@@ -615,7 +665,7 @@ class CacheSynchronizer:
                 if similarity > threshold:
                     similar.append((fb_query, tables, similarity))
             similar.sort(key=lambda x: x[2], reverse=True)
-            self.logger.debug(f"Found {len(similar)} similar feedback entries for query: {query}")
+            self.logger.debug(f"Found {len(similar)} similar feedback entries for query: {normalized_query}")
             return similar
         except Exception as e:
             self.logger.error(f"Error finding similar feedback for query '{query}': {e}")

@@ -1,5 +1,5 @@
 # schema/manager.py: Manages database schema for TableIdentifier-v2.1
-# Enhanced connection validation, cursor handling, and cache fallback
+# Enhanced schema validation and fallback logic
 
 import os
 import json
@@ -36,8 +36,8 @@ class SchemaManager:
                 level=logging.INFO,
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 handlers=[
-                        logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
-                        logging.StreamHandler()
+                    logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
+                    logging.StreamHandler()
                 ]
             )
             logging.error(f"Error loading logging config: {e}")
@@ -58,27 +58,32 @@ class SchemaManager:
         self.tables = tables or []
         for table in self.tables[:]:
             if '.' not in table:
-                self.logger.warning(f"Invalid table format: {table} (expected schema.table)")
+                self.logger.warning(f"Invalid table format: {table}")
                 self.tables.remove(table)
         self.logger.debug(f"Initialized SchemaManager for {db_name}, schemas={self.schemas}, tables={self.tables}")
 
     @contextmanager
     def _get_cursor(self, connection: pyodbc.Connection):
-        """Context manager for cursor handling."""
+        """Context manager for cursor handling with detailed error logging."""
         cursor = None
         try:
             cursor = connection.cursor()
             yield cursor
+        except pyodbc.Error as e:
+            self.logger.error(f"Cursor creation failed: Error {e.args[0]} - {e.args[1]}")
+            raise
         except Exception as e:
-            self.logger.error(f"Cursor error: {e}")
+            self.logger.error(f"Unexpected cursor error: {e}")
             raise
         finally:
             if cursor:
                 try:
                     cursor.close()
                     self.logger.debug("Cursor closed")
+                except pyodbc.Error as e:
+                    self.logger.error(f"Error closing cursor: Error {e.args[0]} - {e.args[1]}")
                 except Exception as e:
-                    self.logger.error(f"Error closing cursor: {e}")
+                    self.logger.error(f"Unexpected error closing cursor: {e}")
 
     def needs_refresh(self, connection: Any) -> bool:
         """Check if schema cache needs refreshing."""
@@ -184,8 +189,11 @@ class SchemaManager:
                 
                 self.logger.debug(f"Schema refresh needed: {needs_refresh}")
                 return needs_refresh
+        except pyodbc.Error as e:
+            self.logger.warning(f"Error checking schema refresh: Error {e.args[0]} - {e.args[1]}")
+            return True
         except Exception as e:
-            self.logger.warning(f"Error checking schema refresh: {e}")
+            self.logger.warning(f"Unexpected error checking schema refresh: {e}")
             return True
 
     def build_data_dict(self, connection: Any) -> Dict:
@@ -194,11 +202,15 @@ class SchemaManager:
         return self.build_schema_dictionary(connection)
 
     def build_schema_dictionary(self, connection: Any) -> Dict:
-        """Build a comprehensive schema dictionary."""
+        """Build a comprehensive schema dictionary with retry logic and schema validation."""
         try:
             if not connection or not hasattr(connection, 'cursor'):
-                self.logger.error("No valid database connection")
-                raise ValueError("Invalid database connection")
+                self.logger.error("Invalid database connection")
+                cached_schema = self.load_from_cache()
+                if cached_schema:
+                    self.logger.info("Using cached schema due to invalid connection")
+                    return cached_schema
+                raise ValueError("Invalid database connection and no cached schema")
             
             schema_dict = {
                 'tables': {},
@@ -209,6 +221,28 @@ class SchemaManager:
                 'indexes': {}
             }
             max_attempts = 3
+            
+            # Validate schema existence
+            with self._get_cursor(connection) as cursor:
+                cursor.execute("""
+                    SELECT schema_name
+                    FROM information_schema.schemata
+                    WHERE catalog_name = ?
+                """, (self.db_name,))
+                available_schemas = [row[0] for row in cursor.fetchall()]
+                if self.schemas:
+                    missing_schemas = [s for s in self.schemas if s not in available_schemas]
+                    if missing_schemas:
+                        self.logger.warning(f"Specified schemas not found in database {self.db_name}: {missing_schemas}")
+                        # Fall back to available non-system schemas
+                        self.schemas = [s for s in available_schemas if s not in self.system_schemas]
+                        if not self.schemas:
+                            self.logger.error(f"No valid schemas found in database {self.db_name}")
+                            cached_schema = self.load_from_cache()
+                            if cached_schema:
+                                self.logger.info("Using cached schema due to missing schemas")
+                                return cached_schema
+                            return schema_dict
             
             for attempt in range(1, max_attempts + 1):
                 try:
@@ -283,7 +317,6 @@ class SchemaManager:
                             schema_dict['views'][schema] = views
                             self.logger.debug(f"Found {len(views)} views in {schema}: {views}")
                             
-                            # Batch fetch columns for all tables in schema
                             if tables:
                                 table_placeholders = ','.join('?' * len(tables))
                                 cursor.execute("""
@@ -304,7 +337,6 @@ class SchemaManager:
                                 for table in tables:
                                     schema_dict['columns'][schema][table] = columns_by_table.get(table, {})
                             
-                            # Fetch constraints and indexes
                             for table in tables:
                                 cursor.execute("""
                                     SELECT column_name 
@@ -385,14 +417,20 @@ class SchemaManager:
                                 self.logger.error("Schema validation failed after all attempts")
                                 break
                 except pyodbc.Error as e:
-                    self.logger.warning(f"Query attempt {attempt} failed: {str(e)}")
+                    self.logger.warning(f"Query attempt {attempt} failed: Error {e.args[0]} - {e.args[1]}")
                     if attempt < max_attempts:
-                        time.sleep(0.1 * (2 ** attempt))
+                        time.sleep(0.1 * (2 ** (attempt - 1)))
                     else:
-                        self.logger.error(f"Failed to build schema dictionary after {max_attempts} attempts: {str(e)}")
+                        self.logger.error(f"Failed to build schema dictionary after {max_attempts} attempts: Error {e.args[0]} - {e.args[1]}")
+                        break
+                except Exception as e:
+                    self.logger.warning(f"Unexpected error on attempt {attempt}: {e}")
+                    if attempt < max_attempts:
+                        time.sleep(0.1 * (2 ** (attempt - 1)))
+                    else:
+                        self.logger.error(f"Failed to build schema dictionary after {max_attempts} attempts: {e}")
                         break
             
-            # Fallback to cache if live fetching fails
             cached_schema = self.load_from_cache()
             if cached_schema:
                 self.logger.info("Using cached schema as fallback")
@@ -400,8 +438,15 @@ class SchemaManager:
             else:
                 self.logger.error("No valid schema available (live fetch failed and no valid cache)")
                 return {}
+        except pyodbc.Error as e:
+            self.logger.error(f"Error building schema dictionary: Error {e.args[0]} - {e.args[1]}")
+            cached_schema = self.load_from_cache()
+            if cached_schema:
+                self.logger.info("Using cached schema as fallback")
+                return cached_schema
+            return {}
         except Exception as e:
-            self.logger.error(f"Error building schema dictionary: {e}")
+            self.logger.error(f"Unexpected error building schema dictionary: {e}")
             cached_schema = self.load_from_cache()
             if cached_schema:
                 self.logger.info("Using cached schema as fallback")
@@ -558,6 +603,9 @@ class SchemaManager:
             
             self.logger.debug("Cache consistency validation successful")
             return True
+        except pyodbc.Error as e:
+            self.logger.error(f"Error validating cache consistency: Error {e.args[0]} - {e.args[1]}")
+            return False
         except Exception as e:
-            self.logger.error(f"Error validating cache consistency: {e}")
+            self.logger.error(f"Unexpected error validating cache consistency: {e}")
             return False

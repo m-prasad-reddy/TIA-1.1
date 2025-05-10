@@ -1,11 +1,11 @@
 # analysis/table_identifier.py: Identifies tables from queries for TableIdentifier-v2.1
-# Enhanced feedback learning, deduplication, and semantic query handling
+# Enhanced feedback deduplication, query generalization, and custom rules
 
 import logging
 import logging.config
 import os
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import spacy
 from sentence_transformers import util
 from config.model_singleton import ModelSingleton
@@ -19,7 +19,6 @@ class TableIdentifier:
     
     def __init__(self, schema_dict: Dict, feedback_manager: FeedbackManager, 
                  pattern_manager: PatternManager, cache_synchronizer: CacheSynchronizer):
-        """Initialize with schema, feedback, patterns, and cache."""
         os.makedirs("logs", exist_ok=True)
         logging_config_path = "app-config/logging_config.ini"
         try:
@@ -42,7 +41,7 @@ class TableIdentifier:
         self.model = ModelSingleton().model
         try:
             self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
-            self.logger.debug("Loaded spacy model: en_core_web_sm")
+            self.logger.debug("Loaded spacy model")
         except Exception as e:
             self.logger.error(f"Failed to load spacy model: {e}")
             raise RuntimeError(f"Spacy model 'en_core_web_sm' not found. Run 'python -m spacy download en_core_web_sm'")
@@ -63,24 +62,23 @@ class TableIdentifier:
             self.last_decay = datetime.now()
             self.logger.debug("Applied weight decay")
 
-    def check_duplicate_feedback(self, query: str, tables: List[str]) -> bool:
-        """Check if feedback for a similar query exists; merge if found."""
+    def check_duplicate_feedback(self, query: str, tables: List[str]) -> Tuple[bool, Optional[str], Optional[List[str]]]:
+        """Check for duplicate feedback; return (is_duplicate, feedback_id, existing_tables)."""
         try:
-            similar_feedback = self.cache_synchronizer.find_similar_feedback(query)
+            normalized_query = self.cache_synchronizer.normalize_query(query)
+            similar_feedback = self.cache_synchronizer.find_similar_feedback(normalized_query, threshold=0.95)
             for fb_query, fb_tables, sim in similar_feedback:
-                if sim > 0.95:  # High similarity for deduplication
-                    self.logger.debug(f"Found similar feedback: '{query}' ~ '{fb_query}' (sim={sim:.2f})")
-                    if set(tables) != set(fb_tables):
-                        self.feedback_manager.store_feedback(fb_query, tables, 0.95)  # Update tables
-                        self.logger.debug(f"Updated feedback for '{fb_query}' with tables: {tables}")
-                    return True
-            return False
+                if sim > 0.95:
+                    fb_id = next(ts for ts, data in self.cache_synchronizer.read_feedback().items() if data['query'] == fb_query)
+                    self.logger.debug(f"Found duplicate: '{normalized_query}' ~ '{fb_query}' (sim={sim:.2f})")
+                    return True, fb_id, fb_tables
+            return False, None, None
         except Exception as e:
-            self.logger.error(f"Error checking duplicate feedback for '{query}': {e}")
-            return False
+            self.logger.error(f"Error checking duplicate feedback: {e}")
+            return False, None, None
 
     def identify_tables(self, query: str, column_scores: Dict[str, float]) -> Tuple[List[str], float]:
-        """Identify tables using feedback, patterns, similarity, and weights."""
+        """Identify tables using feedback, patterns, similarity, weights, and custom rules."""
         try:
             self.logger.debug(f"Processing query: {query}")
             self._decay_weights()
@@ -90,21 +88,19 @@ class TableIdentifier:
             table_scores: Dict[str, float] = {}
             match_details = []
 
-            # Prioritize feedback with lower similarity threshold
+            # Short-circuit for high-similarity feedback
             if self.feedback_manager:
-                similar_feedback = self.cache_synchronizer.find_similar_feedback(query)
-                feedback_tables = set()
+                similar_feedback = self.cache_synchronizer.find_similar_feedback(query, threshold=0.7)
                 for fb_query, fb_tables, sim in similar_feedback:
-                    if sim > 0.7:  # Lower threshold for semantic matches
+                    if sim > 0.95:
+                        self.logger.debug(f"Using feedback: '{fb_query}' -> {fb_tables} (sim={sim:.2f})")
+                        return fb_tables, 0.95
+                    if sim > 0.7:
                         for table_full in fb_tables:
-                            table_scores[table_full] = table_scores.get(table_full, 0) + sim * 3.0  # Stronger weight
-                            match_details.append(f"Feedback match: '{fb_query}' -> '{table_full}' (sim={sim:.2f}, score=+{sim*3.0:.2f})")
-                            feedback_tables.add(table_full)
-                if feedback_tables:
-                    for table_full in feedback_tables:
-                        table_scores[table_full] += 0.5  # Boost feedback tables
-                        match_details.append(f"Feedback boost: '{table_full}' (score=+0.5)")
-                self.logger.debug(f"Found {len(similar_feedback)} similar feedback entries")
+                            table_scores[table_full] = table_scores.get(table_full, 0) + sim * 4.0
+                            match_details.append(f"Feedback: '{fb_query}' -> '{table_full}' (sim={sim:.2f}, score=+{sim*4.0:.2f})")
+                if similar_feedback:
+                    self.logger.debug(f"Found {len(similar_feedback)} similar feedback entries")
 
             # Exact table name matching
             for schema in self.schema_dict['tables']:
@@ -112,7 +108,7 @@ class TableIdentifier:
                     if table.lower() in query_lower:
                         table_full = f"{schema}.{table}"
                         table_scores[table_full] = table_scores.get(table_full, 0) + 0.9
-                        match_details.append(f"Exact match: '{table}' -> '{table_full}' (score=+0.9)")
+                        match_details.append(f"Exact match: '{table}' -> '{table_full}' (+0.9)")
 
             # Pattern-based matching
             patterns = self.pattern_manager.get_patterns()
@@ -120,7 +116,7 @@ class TableIdentifier:
                 if re.search(pattern, query_lower):
                     for table_full in tables:
                         table_scores[table_full] = table_scores.get(table_full, 0) + 0.7
-                        match_details.append(f"Pattern match: '{pattern}' -> '{table_full}' (score=+0.7)")
+                        match_details.append(f"Pattern: '{pattern}' -> '{table_full}' (+0.7)")
 
             # Semantic matching
             query_embedding = self.model.encode(query_lower, show_progress_bar=False)
@@ -131,7 +127,7 @@ class TableIdentifier:
                     similarity = float(util.cos_sim(query_embedding, table_embedding)[0][0])
                     if similarity > self.similarity_threshold:
                         table_scores[table_full] = table_scores.get(table_full, 0) + similarity
-                        match_details.append(f"Semantic match: '{table}' (sim={similarity:.2f}) -> '{table_full}' (score=+{similarity:.2f})")
+                        match_details.append(f"Semantic: '{table}' (sim={similarity:.2f}) -> '{table_full}' (+{similarity:.2f})")
 
             # Weight-based matching
             for table_full, cols in self.weights.items():
@@ -141,11 +137,11 @@ class TableIdentifier:
                     col_lower = col.lower()
                     if col_lower in query_lower or any(token == col_lower for token in tokens):
                         table_scores[table_full] = table_scores.get(table_full, 0) + weight
-                        match_details.append(f"Weight match: '{col_lower}' in '{table_full}' (weight={weight})")
+                        match_details.append(f"Weight: '{col_lower}' in '{table_full}' (weight={weight})")
                     for synonym in self.name_matches.get(col_lower, []):
                         if any(token == synonym.lower() for token in tokens):
                             table_scores[table_full] = table_scores.get(table_full, 0) + weight
-                            match_details.append(f"Weight match via synonym: '{synonym}' -> '{col_lower}' in '{table_full}' (weight={weight})")
+                            match_details.append(f"Synonym: '{synonym}' -> '{col_lower}' in '{table_full}' (weight={weight})")
 
             # Name match lookup
             for col, synonyms in self.name_matches.items():
@@ -156,8 +152,8 @@ class TableIdentifier:
                             for table, cols in self.schema_dict['columns'][schema].items():
                                 if col_lower in [c.lower() for c in cols]:
                                     table_full = f"{schema}.{table}"
-                                    table_scores[table_full] = table_scores.get(table_full, 0) + 0.8
-                                    match_details.append(f"Name match: '{synonym}' -> '{col_lower}' in '{table_full}' (score=+0.8)")
+                                    table_scores[table_full] = table_scores.get(table_full, 0) + 0.6
+                                    match_details.append(f"Name match: '{synonym}' -> '{col_lower}' in '{table_full}' (+0.6)")
 
             # Column score-based matching
             for column_key, score in column_scores.items():
@@ -167,43 +163,35 @@ class TableIdentifier:
                         table_full = f"{schema}.{table}"
                         if table_full in [f"{s}.{t}" for s in self.schema_dict['tables'] for t in self.schema_dict['tables'][s]]:
                             table_scores[table_full] = table_scores.get(table_full, 0) + score * 0.5
-                            match_details.append(f"Column score match: '{column_key}' (score={score}) -> '{table_full}' (score=+{score*0.5:.2f})")
+                            match_details.append(f"Column: '{column_key}' (score={score}) -> '{table_full}' (+{score*0.5:.2f})")
                     except ValueError:
-                        self.logger.debug(f"Invalid column key format: '{column_key}'")
+                        self.logger.debug(f"Invalid column key: '{column_key}'")
 
             # Custom rule for stock/availability
             if any(token in ['stock', 'availability', 'stocks', 'quantities'] for token in tokens):
                 table_full = 'production.stocks'
                 if table_full in [f"{s}.{t}" for s in self.schema_dict['tables'] for t in self.schema_dict['tables'][s]]:
                     table_scores[table_full] = table_scores.get(table_full, 0) + 0.85
-                    match_details.append("Custom rule match: 'stock/availability' -> 'production.stocks' (score=+0.85)")
+                    match_details.append("Custom: 'stock/availability' -> 'production.stocks' (+0.85)")
+                table_full = 'sales.stores'
+                if table_full in [f"{s}.{t}" for s in self.schema_dict['tables'] for t in self.schema_dict['tables'][s]]:
+                    table_scores[table_full] = table_scores.get(table_full, 0) + 0.75
+                    match_details.append("Custom: 'stock/availability' -> 'sales.stores' (+0.75)")
 
-            # Boost for foreign key relationships
-            for table_full in table_scores:
-                schema, table_name = table_full.split('.')
-                foreign_keys = self.schema_dict.get('foreign_keys', {}).get(schema, {}).get(table_name, [])
-                for fk in foreign_keys:
-                    ref_table = fk.get('ref_table', fk.get('referenced_table'))
-                    ref_schema = fk.get('ref_schema', schema)
-                    ref_table_full = f"{ref_schema}.{ref_table}"
-                    if ref_table_full in table_scores:
-                        table_scores[table_full] += 0.05  # Reduced boost
-                        table_scores[ref_table_full] += 0.05
-                        match_details.append(f"Foreign key boost: '{table_full}' <-> '{ref_table_full}' (score=+0.05)")
-
-            # Prune to top tables with strict threshold
+            # Prune to top tables
             ranked_tables = sorted(table_scores.items(), key=lambda x: x[1], reverse=True)
-            selected_tables = [table for table, score in ranked_tables if score > 0.7][:4]  # Stricter threshold
+            selected_tables = [table for table, score in ranked_tables if score > 0.7][:4]
             confidence = min(sum(score for _, score in ranked_tables[:4]) / 4, self.max_confidence) if ranked_tables else 0.0
 
-            # Fallback: Check feedback history
+            # Fallback to feedback history
             if not selected_tables and self.feedback_manager:
                 feedback = self.feedback_manager.get_all_feedback()
+                normalized_query = self.cache_synchronizer.normalize_query(query_lower)
                 for entry in feedback:
-                    if query_lower == entry['query'].lower():
+                    if normalized_query == entry['query'].lower():
                         selected_tables = entry['tables']
                         confidence = max(confidence, 0.9)
-                        match_details.append(f"Feedback match: '{query}' -> {selected_tables} (score=+3.0)")
+                        match_details.append(f"Feedback: '{query}' -> {selected_tables} (+3.0)")
                         break
 
             for detail in match_details:
@@ -211,36 +199,36 @@ class TableIdentifier:
             if selected_tables:
                 self.logger.debug(f"Final tables: {selected_tables}, confidence={confidence:.2f}")
             else:
-                self.logger.debug(f"No tables identified for query: {query}")
+                self.logger.debug(f"No tables identified for query")
             return selected_tables, confidence
         except Exception as e:
-            self.logger.error(f"Error identifying tables for query '{query}': {e}")
+            self.logger.error(f"Error identifying tables: {e}")
             return [], 0.0
 
     def update_weights_from_feedback(self, query: str, tables: List[str]):
         """Update weights based on feedback, skip or merge duplicates."""
         try:
-            # Check for duplicate feedback
-            if self.check_duplicate_feedback(query, tables):
-                self.logger.debug(f"Skipped weight update for duplicate feedback: {query}")
+            is_duplicate, _, _ = self.check_duplicate_feedback(query, tables)
+            if is_duplicate:
+                self.logger.debug(f"Skipped weight update for duplicate feedback")
                 return
 
             valid_tables = set(tables)
             all_tables = {f"{s}.{t}" for s in self.schema_dict['tables'] for t in self.schema_dict['tables'][s]}
             for table_full in all_tables:
                 schema, table_name = table_full.split('.')
-                weight_change = 0.02 if table_full in valid_tables else -0.1  # Stronger penalty
+                weight_change = 0.02 if table_full in valid_tables else -0.15
                 if table_full not in self.weights:
                     self.weights[table_full] = {}
                 for col in self.schema_dict['columns'].get(schema, {}).get(table_name, []):
                     col_lower = col.lower()
-                    self.weights[table_full][col_lower] = min(max(0.05, self.weights[table_full].get(col_lower, 0.05) + weight_change), 0.7)
+                    self.weights[table_full][col_lower] = min(max(0.05, self.weights[table_full].get(col_lower, 0.05) + weight_change), 0.8)
                     self.logger.debug(f"{'Increased' if weight_change > 0 else 'Decreased'} weight for '{col_lower}' in '{table_full}' to {self.weights[table_full][col_lower]:.2f}")
             self.cache_synchronizer.write_weights(self.weights)
             self.cache_synchronizer.delete_ignored_query(query)
-            self.logger.debug(f"Weights updated and query '{query}' removed from ignored_queries")
+            self.logger.debug(f"Weights updated and query removed from ignored_queries")
         except Exception as e:
-            self.logger.error(f"Error updating weights for query '{query}': {e}")
+            self.logger.error(f"Error updating weights: {e}")
 
     def update_name_matches(self, column: str, synonyms: List[str]):
         """Update name matches with new synonyms."""
@@ -253,13 +241,13 @@ class TableIdentifier:
             self.cache_synchronizer.write_name_matches(self.name_matches, 'dynamic')
             self.logger.debug(f"Updated name matches for '{column_lower}': {self.name_matches[column_lower]}")
         except Exception as e:
-            self.logger.error(f"Error updating name matches for '{column}': {e}")
+            self.logger.error(f"Error updating name matches: {e}")
 
     def save_name_matches(self):
         """Save name matches to cache."""
         try:
             self.cache_synchronizer.write_name_matches(self.name_matches, 'dynamic')
-            self.logger.debug("Saved name matches to cache")
+            self.logger.debug("Saved name matches")
         except Exception as e:
             self.logger.error(f"Error saving name matches: {e}")
 
@@ -284,13 +272,11 @@ class TableIdentifier:
         """Preprocess query by normalizing and lemmatizing."""
         try:
             query_clean = re.sub(r'\s+', ' ', query.strip().lower())
-            self.logger.debug(f"Normalized query: {query_clean}")
             doc = self.nlp(query_clean)
             tokens = [token.lemma_ for token in doc if not token.is_stop and not token.is_punct]
-            self.logger.debug(f"Lemmatized tokens: {tokens}")
             processed_query = ' '.join(tokens)
             self.logger.debug(f"Preprocessed query: {query} -> {processed_query}")
             return processed_query if processed_query else query_clean
         except Exception as e:
-            self.logger.error(f"Error preprocessing query '{query}': {e}")
+            self.logger.error(f"Error preprocessing query: {e}")
             return query.lower()
