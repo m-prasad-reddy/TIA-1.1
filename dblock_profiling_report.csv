@@ -1,0 +1,13 @@
+ncalls ,tottime ,percall ,cumtime ,percall ,filename:lineno(function) 
+415/1,0.007387,0.007387,67.65,67.65,:0(<built-in method builtins.exec>) 
+1,0.0001425,0.0001425,67.65,67.65,main.py:353(main) 
+1,0.0001355,0.0001355,67.65,67.65,main.py:66(run) 
+1,4.07E-05,4.07 e-05 ,39.23,39.23,main.py: 142(connect to database) 
+1,0.0001098,0.0001098,39.15,39.15,main.py: 163(_initialize managers) 
+1,5.28E-05,5.28E-05,33.02,33.02,metadata initializer.py:87(initialize) 
+1,0.0001343,0.0001343,32.9,32.9,metadata initializer.py:166(_build weights) 
+7,32.89,4.699,32.89,4.699,:0(<method 'execute' of 'sqlite3 .Cursor' objects>) 
+1,7.59E-05,7.59E-05,32.89,32.89,cache synchronizer.py:265(write weights) 
+1,28.41,28.41,28.41,28.41,:0(<built-in method builtins.input>) 
+1,7.45E-05,7.45E-05,6.117,6.117,metadata 
+2,3.63E-05,1.82E-05,4.899,2.449,model singleton.py: 14(_ new

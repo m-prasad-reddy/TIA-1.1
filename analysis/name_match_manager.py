@@ -1,5 +1,5 @@
 # analysis/name_match_manager.py: Manages name matches and synonyms for TableIdentifier-v2.1
-# Enhanced synonym scoring and feedback learning
+# Enhanced synonym scoring for dynamic matches and feedback learning
 
 import os
 import json
@@ -38,9 +38,9 @@ class NameMatchManager:
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 handlers=[
                     logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
-                        logging.StreamHandler()
-                    ]
-                )
+                    logging.StreamHandler()
+                ]
+            )
             logging.error(f"Error loading logging config: {e}")
         
         self.logger = logging.getLogger("name_match_manager")
@@ -239,7 +239,7 @@ class NameMatchManager:
                                 score += 0.05
                             if col_lower in schema_dict['primary_keys'].get(schema, {}).get(table, []):
                                 score += 0.1
-                            self.logger.debug(f"Scoring '{col_lower}': {matched_synonyms}, score={score:.2f}")
+                            self.logger.debug(f"Scoring '{col_lower}': synonyms={matched_synonyms}, score={score:.2f}")
                         scores[f"{schema}.{table}.{col_lower}"] = score
                         self.logger.debug(f"Column score for '{col_lower}': {score:.2f}")
             return scores

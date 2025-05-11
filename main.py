@@ -16,7 +16,7 @@ from analysis.name_match_manager import NameMatchManager
 from analysis.processor import NLPPipeline
 from nlp.QueryProcessor import QueryProcessor
 from cli.interface import DatabaseAnalyzerCLI
-
+import cProfile
 class DatabaseAnalyzer:
     """Main class for database schema analysis and query processing."""
     
@@ -353,3 +353,13 @@ class DatabaseAnalyzer:
 if __name__ == "__main__":
     analyzer = DatabaseAnalyzer()
     analyzer.run()
+
+# Comment above 3 lines and run the below code with cProfile
+# to profile the performance of the application.
+# def main():
+#     """Main function to run the Database Analyzer."""
+#     analyzer = DatabaseAnalyzer()
+#     analyzer.run()
+    
+# if __name__ == "__main__":
+#     cProfile.run("main()", "profile.out")    

@@ -1,5 +1,5 @@
 # analysis/table_identifier.py: Identifies tables from queries for TableIdentifier-v2.1
-# Enhanced feedback deduplication, query generalization, and custom rules
+# Enhanced with typo correction, feedback cleaning, and improved validation
 
 import logging
 import logging.config
@@ -77,6 +77,60 @@ class TableIdentifier:
             self.logger.error(f"Error checking duplicate feedback: {e}")
             return False, None, None
 
+    def clean_feedback_cache(self) -> None:
+        """Remove feedback entries with invalid table names."""
+        try:
+            feedback = self.cache_synchronizer.get_feedback()
+            valid_feedback = []
+            all_tables = {f"{s}.{t}" for s in self.schema_dict['tables'] for t in self.schema_dict['tables'][s]}
+            
+            for timestamp, query, tables, embedding, count in feedback:
+                valid = True
+                for table in tables:
+                    if table not in all_tables:
+                        self.logger.debug(f"Removing feedback with invalid table: '{table}' in query '{query}'")
+                        valid = False
+                        break
+                if valid:
+                    valid_feedback.append((timestamp, query, tables, embedding, count))
+                else:
+                    self.cache_synchronizer.delete_feedback(query)
+            
+            self.logger.debug(f"Cleaned feedback cache, retained {len(valid_feedback)} valid entries")
+        except Exception as e:
+            self.logger.error(f"Error cleaning feedback cache: {e}")
+            raise
+
+    def correct_table_typo(self, table: str) -> str:
+        """Correct common table name typos (e.g., singular to plural)."""
+        if table.endswith(".order_item"):
+            return table[:-5] + "items"
+        return table
+
+    def validate_tables(self, tables: List[str]) -> Tuple[List[str], List[str]]:
+        """Validate if tables exist in the schema and correct typos."""
+        try:
+            valid, invalid = [], []
+            all_tables = {f"{s}.{t}" for s in self.schema_dict['tables'] for t in self.schema_dict['tables'][s]}
+            for table in tables:
+                # Check exact match
+                if table in all_tables:
+                    valid.append(table)
+                    continue
+                # Try correcting typo
+                corrected_table = self.correct_table_typo(table)
+                if corrected_table in all_tables:
+                    self.logger.debug(f"Corrected table name: '{table}' -> '{corrected_table}'")
+                    valid.append(corrected_table)
+                else:
+                    invalid.append(table)
+                    self.logger.debug(f"Invalid table: '{table}'")
+            self.logger.debug(f"Validated tables: valid={valid}, invalid={invalid}")
+            return valid, invalid
+        except Exception as e:
+            self.logger.error(f"Error validating tables: {e}")
+            return [], tables
+
     def identify_tables(self, query: str, column_scores: Dict[str, float]) -> Tuple[List[str], float]:
         """Identify tables using feedback, patterns, similarity, weights, and custom rules."""
         try:
@@ -88,15 +142,22 @@ class TableIdentifier:
             table_scores: Dict[str, float] = {}
             match_details = []
 
+            # Clean feedback cache to remove invalid entries
+            self.clean_feedback_cache()
+
             # Short-circuit for high-similarity feedback
             if self.feedback_manager:
                 similar_feedback = self.cache_synchronizer.find_similar_feedback(query, threshold=0.7)
                 for fb_query, fb_tables, sim in similar_feedback:
-                    if sim > 0.95:
-                        self.logger.debug(f"Using feedback: '{fb_query}' -> {fb_tables} (sim={sim:.2f})")
-                        return fb_tables, 0.95
+                    valid_tables, invalid_tables = self.validate_tables(fb_tables)
+                    if invalid_tables:
+                        self.logger.debug(f"Invalid tables in feedback: {invalid_tables}")
+                        continue
+                    if sim > 0.95 and valid_tables:
+                        self.logger.debug(f"Using feedback: '{fb_query}' -> {valid_tables} (sim={sim:.2f})")
+                        return valid_tables, 0.95
                     if sim > 0.7:
-                        for table_full in fb_tables:
+                        for table_full in valid_tables:
                             table_scores[table_full] = table_scores.get(table_full, 0) + sim * 4.0
                             match_details.append(f"Feedback: '{fb_query}' -> '{table_full}' (sim={sim:.2f}, score=+{sim*4.0:.2f})")
                 if similar_feedback:
@@ -114,7 +175,8 @@ class TableIdentifier:
             patterns = self.pattern_manager.get_patterns()
             for pattern, tables in patterns.items():
                 if re.search(pattern, query_lower):
-                    for table_full in tables:
+                    valid_tables, _ = self.validate_tables(tables)
+                    for table_full in valid_tables:
                         table_scores[table_full] = table_scores.get(table_full, 0) + 0.7
                         match_details.append(f"Pattern: '{pattern}' -> '{table_full}' (+0.7)")
 
@@ -189,10 +251,12 @@ class TableIdentifier:
                 normalized_query = self.cache_synchronizer.normalize_query(query_lower)
                 for entry in feedback:
                     if normalized_query == entry['query'].lower():
-                        selected_tables = entry['tables']
-                        confidence = max(confidence, 0.9)
-                        match_details.append(f"Feedback: '{query}' -> {selected_tables} (+3.0)")
-                        break
+                        valid_tables, _ = self.validate_tables(entry['tables'])
+                        if valid_tables:
+                            selected_tables = valid_tables
+                            confidence = max(confidence, 0.9)
+                            match_details.append(f"Feedback: '{query}' -> {selected_tables} (+3.0)")
+                            break
 
             for detail in match_details:
                 self.logger.debug(detail)
@@ -208,12 +272,17 @@ class TableIdentifier:
     def update_weights_from_feedback(self, query: str, tables: List[str]):
         """Update weights based on feedback, skip or merge duplicates."""
         try:
-            is_duplicate, _, _ = self.check_duplicate_feedback(query, tables)
+            valid_tables, invalid_tables = self.validate_tables(tables)
+            if invalid_tables:
+                self.logger.debug(f"Invalid tables in feedback: {invalid_tables}, cleaning cache")
+                self.clean_feedback_cache()
+                return
+
+            is_duplicate, _, _ = self.check_duplicate_feedback(query, valid_tables)
             if is_duplicate:
                 self.logger.debug(f"Skipped weight update for duplicate feedback")
                 return
 
-            valid_tables = set(tables)
             all_tables = {f"{s}.{t}" for s in self.schema_dict['tables'] for t in self.schema_dict['tables'][s]}
             for table_full in all_tables:
                 schema, table_name = table_full.split('.')
@@ -250,23 +319,6 @@ class TableIdentifier:
             self.logger.debug("Saved name matches")
         except Exception as e:
             self.logger.error(f"Error saving name matches: {e}")
-
-    def validate_tables(self, tables: List[str]) -> Tuple[List[str], List[str]]:
-        """Validate if tables exist in the schema."""
-        try:
-            valid, invalid = [], []
-            for table in tables:
-                schema, table_name = table.split('.') if '.' in table else (None, table)
-                if schema and table_name and schema in self.schema_dict['tables'] and table_name in self.schema_dict['tables'][schema]:
-                    valid.append(table)
-                else:
-                    invalid.append(table)
-                    self.logger.debug(f"Invalid table: '{table}'")
-            self.logger.debug(f"Validated tables: valid={valid}, invalid={invalid}")
-            return valid, invalid
-        except Exception as e:
-            self.logger.error(f"Error validating tables: {e}")
-            return [], tables
 
     def preprocess_query(self, query: str) -> str:
         """Preprocess query by normalizing and lemmatizing."""

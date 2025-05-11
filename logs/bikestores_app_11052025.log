@@ -1,0 +1,144 @@
+Console log:
+
+
+------------------------------------------- END OF CONSOLE LOG -----------------------------------------------
+------------------------------------------- BEGIN OF APPLICATION LOG -----------------------------------------
+application log:
+
+BEGIN ITERATION-1
+
+2025-05-11 07:47:02,275 - analyzer - DEBUG - Initialized DatabaseAnalyzer
+2025-05-11 07:47:02,277 - analyzer - DEBUG - Loaded 3 configurations
+2025-05-11 07:48:06,482 - analyzer - DEBUG - Configuration choice: 3
+2025-05-11 07:48:06,483 - analyzer - DEBUG - Set config: BikeStores
+2025-05-11 07:48:06,483 - database_connection - DEBUG - Attempting connection: DRIVER=ODBC Driver 17 for SQL Server, SERVER=localhost, DATABASE=BikeStores
+2025-05-11 07:48:06,692 - database_connection - INFO - Connected to BikeStores
+2025-05-11 07:48:06,694 - analyzer - DEBUG - Initializing managers for BikeStores
+2025-05-11 07:48:06,698 - schema - DEBUG - Initialized SchemaManager for BikeStores, schemas=['hr', 'production', 'sales'], tables=[]
+2025-05-11 07:48:06,706 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cuda:0
+2025-05-11 07:48:06,706 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-11 07:48:06,710 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2025-05-11 07:48:07,455 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/modules.json HTTP/11" 200 0
+2025-05-11 07:48:08,097 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/config_sentence_transformers.json HTTP/11" 200 0
+2025-05-11 07:48:08,758 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/README.md HTTP/11" 200 0
+2025-05-11 07:48:09,121 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/modules.json HTTP/11" 200 0
+2025-05-11 07:48:09,357 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/sentence_bert_config.json HTTP/11" 200 0
+2025-05-11 07:48:09,688 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/adapter_config.json HTTP/11" 404 0
+2025-05-11 07:48:09,969 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json HTTP/11" 200 0
+2025-05-11 07:48:11,440 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer_config.json HTTP/11" 200 0
+2025-05-11 07:48:11,781 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2/revision/main HTTP/11" 200 6806
+2025-05-11 07:48:12,074 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2 HTTP/11" 200 6806
+2025-05-11 07:48:12,721 - model_singleton - INFO - Initialized SentenceTransformer model
+2025-05-11 07:48:14,324 - cache_synchronizer - DEBUG - Initialized database tables: weights, name_matches, feedback, ignored_queries
+2025-05-11 07:48:14,324 - cache_synchronizer - DEBUG - Initialized SQLite database at app-config\BikeStores\cache.db
+2025-05-11 07:48:14,325 - cache_synchronizer - INFO - Initialized CacheSynchronizer for BikeStores
+2025-05-11 07:48:14,326 - metadata_initializer - DEBUG - Initialized MetadataInitializer for BikeStores
+2025-05-11 07:48:14,327 - metadata_initializer - INFO - Deduplicating feedback cache
+2025-05-11 07:48:14,328 - cache_synchronizer - INFO - Removed 0 duplicate feedback entries
+2025-05-11 07:48:14,329 - metadata_initializer - DEBUG - Removed 0 duplicate feedback entries
+2025-05-11 07:48:14,329 - metadata_initializer - INFO - Checking metadata caches
+2025-05-11 07:48:14,331 - metadata_initializer - INFO - Building schema cache
+2025-05-11 07:48:14,334 - schema - DEBUG - Cursor closed
+2025-05-11 07:48:14,335 - schema - DEBUG - Attempt 1: Fetching schemas
+2025-05-11 07:48:14,336 - schema - DEBUG - Using specified schemas: ['hr', 'production', 'sales']
+2025-05-11 07:48:14,337 - schema - DEBUG - Processing schema: hr
+2025-05-11 07:48:14,349 - schema - DEBUG - Found 2 tables in hr: ['candidates', 'employees']
+2025-05-11 07:48:14,362 - schema - DEBUG - Found 0 views in hr: []
+2025-05-11 07:48:15,005 - schema - DEBUG - Processing schema: production
+2025-05-11 07:48:15,017 - schema - DEBUG - Found 4 tables in production: ['categories', 'brands', 'products', 'stocks']
+2025-05-11 07:48:15,028 - schema - DEBUG - Found 0 views in production: []
+2025-05-11 07:48:15,954 - schema - DEBUG - Processing schema: sales
+2025-05-11 07:48:15,966 - schema - DEBUG - Found 5 tables in sales: ['customers', 'stores', 'staffs', 'orders', 'order_items']
+2025-05-11 07:48:15,978 - schema - DEBUG - Found 0 views in sales: []
+2025-05-11 07:48:16,907 - schema - DEBUG - Schema validation successful
+2025-05-11 07:48:16,907 - schema - DEBUG - Schema validation successful
+2025-05-11 07:48:16,912 - schema - DEBUG - Saved schema to schema_cache\BikeStores\schema.json
+2025-05-11 07:48:16,913 - schema - DEBUG - Updated metadata in schema_cache\BikeStores\metadata.json
+2025-05-11 07:48:16,914 - schema - DEBUG - Schema dictionary built successfully
+2025-05-11 07:48:16,915 - schema - DEBUG - Cursor closed
+2025-05-11 07:48:16,916 - schema - DEBUG - Schema validation successful
+2025-05-11 07:48:16,920 - schema - DEBUG - Saved schema to schema_cache\BikeStores\schema.json
+2025-05-11 07:48:16,921 - schema - DEBUG - Updated metadata in schema_cache\BikeStores\metadata.json
+2025-05-11 07:48:16,922 - metadata_initializer - DEBUG - Saved schema to schema_cache\BikeStores\schema.json
+2025-05-11 07:48:16,923 - metadata_initializer - INFO - Building weights cache
+2025-05-11 07:48:16,924 - metadata_initializer - DEBUG - Processing 11 tables for weights
+2025-05-11 07:48:16,925 - metadata_initializer - DEBUG - Processing weights batch 1 (11 tables)
+2025-05-11 08:18:30,350 - analyzer - DEBUG - Initialized DatabaseAnalyzer
+2025-05-11 08:18:30,352 - analyzer - DEBUG - Loaded 3 configurations
+2025-05-11 08:18:58,763 - analyzer - DEBUG - Configuration choice: 3
+2025-05-11 08:18:58,764 - analyzer - DEBUG - Set config: BikeStores
+2025-05-11 08:18:58,765 - database_connection - DEBUG - Attempting connection: DRIVER=ODBC Driver 17 for SQL Server, SERVER=localhost, DATABASE=BikeStores
+2025-05-11 08:18:58,841 - database_connection - INFO - Connected to BikeStores
+2025-05-11 08:18:58,845 - analyzer - DEBUG - Initializing managers for BikeStores
+2025-05-11 08:18:58,854 - schema - DEBUG - Initialized SchemaManager for BikeStores, schemas=['hr', 'production', 'sales'], tables=[]
+2025-05-11 08:18:58,874 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cuda:0
+2025-05-11 08:18:58,875 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-11 08:18:58,882 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2025-05-11 08:18:59,680 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/modules.json HTTP/11" 200 0
+2025-05-11 08:18:59,918 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/config_sentence_transformers.json HTTP/11" 200 0
+2025-05-11 08:19:00,575 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/README.md HTTP/11" 200 0
+2025-05-11 08:19:00,806 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/modules.json HTTP/11" 200 0
+2025-05-11 08:19:01,045 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/sentence_bert_config.json HTTP/11" 200 0
+2025-05-11 08:19:01,292 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/adapter_config.json HTTP/11" 404 0
+2025-05-11 08:19:01,532 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json HTTP/11" 200 0
+2025-05-11 08:19:02,580 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer_config.json HTTP/11" 200 0
+2025-05-11 08:19:02,870 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2/revision/main HTTP/11" 200 6806
+2025-05-11 08:19:03,119 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2 HTTP/11" 200 6806
+2025-05-11 08:19:03,761 - model_singleton - INFO - Initialized SentenceTransformer model
+2025-05-11 08:19:04,966 - cache_synchronizer - DEBUG - Initialized database tables: weights, name_matches, feedback, ignored_queries
+2025-05-11 08:19:04,967 - cache_synchronizer - DEBUG - Initialized SQLite database at app-config\BikeStores\cache.db
+2025-05-11 08:19:04,968 - cache_synchronizer - INFO - Initialized CacheSynchronizer for BikeStores
+2025-05-11 08:19:04,969 - metadata_initializer - DEBUG - Initialized MetadataInitializer for BikeStores
+2025-05-11 08:19:04,970 - metadata_initializer - INFO - Deduplicating feedback cache
+2025-05-11 08:19:04,970 - cache_synchronizer - INFO - Removed 0 duplicate feedback entries
+2025-05-11 08:19:04,971 - metadata_initializer - DEBUG - Removed 0 duplicate feedback entries
+2025-05-11 08:19:04,972 - metadata_initializer - INFO - Checking metadata caches
+2025-05-11 08:19:04,973 - metadata_initializer - INFO - Building schema cache
+2025-05-11 08:19:04,975 - schema - DEBUG - Cursor closed
+2025-05-11 08:19:04,976 - schema - DEBUG - Attempt 1: Fetching schemas
+2025-05-11 08:19:04,977 - schema - DEBUG - Using specified schemas: ['hr', 'production', 'sales']
+2025-05-11 08:19:04,977 - schema - DEBUG - Processing schema: hr
+2025-05-11 08:19:04,983 - schema - DEBUG - Found 2 tables in hr: ['candidates', 'employees']
+2025-05-11 08:19:04,987 - schema - DEBUG - Found 0 views in hr: []
+2025-05-11 08:19:04,995 - schema - DEBUG - Processing schema: production
+2025-05-11 08:19:04,999 - schema - DEBUG - Found 4 tables in production: ['categories', 'brands', 'products', 'stocks']
+2025-05-11 08:19:05,003 - schema - DEBUG - Found 0 views in production: []
+2025-05-11 08:19:05,023 - schema - DEBUG - Processing schema: sales
+2025-05-11 08:19:05,027 - schema - DEBUG - Found 5 tables in sales: ['customers', 'stores', 'staffs', 'orders', 'order_items']
+2025-05-11 08:19:05,031 - schema - DEBUG - Found 0 views in sales: []
+2025-05-11 08:19:05,058 - schema - DEBUG - Schema validation successful
+2025-05-11 08:19:05,060 - schema - DEBUG - Schema validation successful
+2025-05-11 08:19:05,069 - schema - DEBUG - Saved schema to schema_cache\BikeStores\schema.json
+2025-05-11 08:19:05,071 - schema - DEBUG - Updated metadata in schema_cache\BikeStores\metadata.json
+2025-05-11 08:19:05,072 - schema - DEBUG - Schema dictionary built successfully
+2025-05-11 08:19:05,073 - schema - DEBUG - Cursor closed
+2025-05-11 08:19:05,075 - schema - DEBUG - Schema validation successful
+2025-05-11 08:19:05,083 - schema - DEBUG - Saved schema to schema_cache\BikeStores\schema.json
+2025-05-11 08:19:05,086 - schema - DEBUG - Updated metadata in schema_cache\BikeStores\metadata.json
+2025-05-11 08:19:05,087 - metadata_initializer - DEBUG - Saved schema to schema_cache\BikeStores\schema.json
+2025-05-11 08:19:05,088 - metadata_initializer - INFO - Building weights cache
+2025-05-11 08:19:05,089 - metadata_initializer - DEBUG - Processing 11 tables for weights
+2025-05-11 08:19:05,090 - metadata_initializer - DEBUG - Processing weights batch 1 (11 tables)
+2025-05-11 08:19:37,983 - cache_synchronizer - ERROR - Error writing weights: database is locked
+2025-05-11 08:19:37,986 - metadata_initializer - ERROR - Error building weights: database is locked
+2025-05-11 08:19:37,988 - metadata_initializer - ERROR - Failed to build weights
+2025-05-11 08:19:37,990 - analyzer - ERROR - Failed to initialize managers: Metadata initialization failed
+Traceback (most recent call last):
+  File "c:\Users\varaprasad\Pythonworks\Text2SQl\TIV-1.1\main.py", line 171, in _initialize_managers
+    raise RuntimeError("Metadata initialization failed")
+RuntimeError: Metadata initialization failed
+2025-05-11 08:19:37,995 - analyzer - ERROR - Initialization error: Manager initialization failed: Metadata initialization failed
+Traceback (most recent call last):
+  File "c:\Users\varaprasad\Pythonworks\Text2SQl\TIV-1.1\main.py", line 171, in _initialize_managers
+    raise RuntimeError("Metadata initialization failed")
+RuntimeError: Metadata initialization failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "c:\Users\varaprasad\Pythonworks\Text2SQl\TIV-1.1\main.py", line 156, in connect_to_database
+    self._initialize_managers()
+  File "c:\Users\varaprasad\Pythonworks\Text2SQl\TIV-1.1\main.py", line 203, in _initialize_managers
+    raise RuntimeError(f"Manager initialization failed: {e}")
+RuntimeError: Manager initialization failed: Metadata initialization failed
+2025-05-11 08:19:38,150 - cache_synchronizer - DEBUG - Closed SQLite connection

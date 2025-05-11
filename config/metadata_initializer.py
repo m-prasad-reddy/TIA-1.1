@@ -1,5 +1,5 @@
 # config/metadata_initializer.py: Initializes metadata caches for TableIdentifier-v2.1
-# Restored detailed synonym generation and feedback, fixed .bak migration
+# Enhanced with single-table processing and weight existence checks
 
 import os
 import json
@@ -14,6 +14,9 @@ from config.model_singleton import ModelSingleton
 from schema.manager import SchemaManager
 from config.manager import DatabaseConnection
 from config.cache_synchronizer import CacheSynchronizer
+import signal
+import sys
+import time
 
 class MetadataInitializer:
     """Initializes metadata caches for TableIdentifier-v2.1 first launch."""
@@ -65,6 +68,25 @@ class MetadataInitializer:
         self.synonym_threshold = 0.7
         self.system_schemas = ['dbo', 'sys', 'information_schema']
         self.logger.debug(f"Initialized MetadataInitializer for {db_name}")
+        
+        # Set up signal handler for Ctrl+C
+        signal.signal(signal.SIGINT, self._signal_handler)
+        
+        # Deduplicate feedback to reduce cache size
+        self.logger.info("Deduplicating feedback cache")
+        removed = self.cache_synchronizer.deduplicate_feedback()
+        self.logger.debug(f"Removed {removed} duplicate feedback entries")
+        
+        # Log feedback count
+        feedback_count = self.cache_synchronizer.count_feedback()
+        self.logger.debug(f"Feedback table contains {feedback_count} entries")
+
+    def _signal_handler(self, sig, frame):
+        """Handle SIGINT (Ctrl+C) to gracefully exit."""
+        self.logger.info("Received SIGINT, closing connections and exiting")
+        self.cache_synchronizer.close()
+        self.connection_manager.close()
+        sys.exit(0)
 
     def initialize(self) -> bool:
         try:
@@ -145,24 +167,39 @@ class MetadataInitializer:
             self.logger.error(f"Error building schema cache: {e}")
             return {}
 
-    def _build_weights(self, schema_dict: Dict) -> Dict[str, Dict[str, float]]:
+    def _build_weights(self, schema_dict: Dict, batch_size: int = 1) -> Dict[str, Dict[str, float]]:
         try:
             weights = {}
-            for schema in schema_dict['tables']:
+            existing_weights = self.cache_synchronizer.load_weights()
+            all_tables = [(schema, table) for schema in schema_dict['tables'] for table in schema_dict['tables'][schema]]
+            total_tables = len(all_tables)
+            self.logger.debug(f"Processing {total_tables} tables for weights")
+            
+            for i, (schema, table) in enumerate(all_tables):
                 if schema.lower() in self.system_schemas:
                     self.logger.debug(f"Skipping system schema for weights: {schema}")
                     continue
-                for table in schema_dict['tables'][schema]:
-                    table_full = f"{schema}.{table}"
-                    weights[table_full] = {}
-                    for col in schema_dict['columns'][schema][table]:
-                        weights[table_full][col.lower()] = 0.05
-                    if schema in schema_dict['primary_keys'] and table in schema_dict['primary_keys'][schema]:
-                        for pk in schema_dict['primary_keys'][schema][table]:
-                            weights[table_full][pk.lower()] = 0.1
-                    if schema in schema_dict['foreign_keys'] and table in schema_dict['foreign_keys'][schema]:
-                        for fk in schema_dict['foreign_keys'][schema][table]:
-                            weights[table_full][fk['column'].lower()] = 0.08
+                table_full = f"{schema}.{table}"
+                if table_full in existing_weights:
+                    self.logger.debug(f"Skipping existing weights for {table_full}")
+                    weights[table_full] = existing_weights[table_full]
+                    continue
+                
+                self.logger.debug(f"Processing weights for table {i+1}/{total_tables}: {table_full}")
+                weights[table_full] = {}
+                for col in schema_dict['columns'][schema][table]:
+                    weights[table_full][col.lower()] = 0.05
+                if schema in schema_dict['primary_keys'] and table in schema_dict['primary_keys'][schema]:
+                    for pk in schema_dict['primary_keys'][schema][table]:
+                        weights[table_full][pk.lower()] = 0.1
+                if schema in schema_dict['foreign_keys'] and table in schema_dict['foreign_keys'][schema]:
+                    for fk in schema_dict['foreign_keys'][schema][table]:
+                        weights[table_full][fk['column'].lower()] = 0.08
+                
+                self.cache_synchronizer.write_weights({table_full: weights[table_full]}, batch_size=10)
+                self.logger.debug(f"Saved weights for {table_full}")
+                time.sleep(0.01)
+            
             return weights
         except Exception as e:
             self.logger.error(f"Error building weights: {e}")
@@ -278,8 +315,9 @@ class MetadataInitializer:
             self.logger.error(f"Error generating query synonyms: {e}")
             return {"example_queries": [], "synonyms": {}}
 
-    def _build_synthetic_feedback(self, schema_dict: Dict) -> bool:
+    def _build_synthetic_feedback(self, schema_dict: Dict, batch_size: int = 50) -> bool:
         try:
+            all_queries = []
             for schema in schema_dict['tables']:
                 if schema.lower() in self.system_schemas:
                     self.logger.debug(f"Skipping system schema for feedback: {schema}")
@@ -303,23 +341,31 @@ class MetadataInitializer:
                             f"Count {table_name} by {col_lower}",
                             f"Sum {col_lower} in {table_name}"
                         ])
-                    for query in queries:
-                        try:
-                            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                            embedding = self.model.encode(query, show_progress_bar=False)
-                            self.cache_synchronizer.write_feedback(timestamp, query, [table_full], embedding, count=1)
-                            self.logger.debug(f"Created feedback: {query} -> {table_full}")
-                        except Exception as e:
-                            self.logger.error(f"Error creating feedback for query '{query}': {e}")
-                            continue
-                    # Multi-table feedback for related tables
+                    all_queries.extend([(query, [table_full]) for query in queries])
                     related_tables = self._find_related_tables(schema_dict, schema, table)
                     if related_tables:
                         query = f"Join {table_name} with {related_tables[0].split('.')[-1]}"
+                        all_queries.append((query, [table_full, related_tables[0]]))
+            
+            total_queries = len(all_queries)
+            self.logger.debug(f"Generating {total_queries} synthetic feedback entries")
+            
+            for i in range(0, total_queries, batch_size):
+                batch = all_queries[i:i + batch_size]
+                self.logger.debug(f"Processing feedback batch {i//batch_size + 1} ({len(batch)} entries)")
+                
+                for query, tables in batch:
+                    try:
                         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
                         embedding = self.model.encode(query, show_progress_bar=False)
-                        self.cache_synchronizer.write_feedback(timestamp, query, [table_full, related_tables[0]], embedding, count=1)
-                        self.logger.debug(f"Created multi-table feedback: {query}")
+                        self.cache_synchronizer.write_feedback(timestamp, query, tables, embedding, count=1)
+                        self.logger.debug(f"Created feedback: {query} -> {tables}")
+                    except Exception as e:
+                        self.logger.error(f"Error creating feedback for query '{query}': {e}")
+                        continue
+                
+                time.sleep(0.01)
+            
             return True
         except Exception as e:
             self.logger.error(f"Error building synthetic feedback: {e}")
