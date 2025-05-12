@@ -1,5 +1,5 @@
 # main.py: Entry point for Database Schema Analyzer
-# Updated to support new database_configurations.json format with schemas/tables
+# Updated to remove ensure_model call to fix AttributeError while preserving all functionality
 
 import logging
 import logging.config
@@ -17,6 +17,7 @@ from analysis.processor import NLPPipeline
 from nlp.QueryProcessor import QueryProcessor
 from cli.interface import DatabaseAnalyzerCLI
 import cProfile
+
 class DatabaseAnalyzer:
     """Main class for database schema analysis and query processing."""
     
@@ -41,11 +42,11 @@ class DatabaseAnalyzer:
             logging.basicConfig(
                 level=logging.INFO,
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                handlers=[
-                    logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
-                    logging.StreamHandler()
-                ]
-            )
+                    handlers=[
+                        logging.FileHandler(os.path.join("logs", "bikestores_app.log")),
+                        logging.StreamHandler()
+                    ]
+                )
             logging.error(f"Error loading logging config: {e}")
         
         self.logger = logging.getLogger("analyzer")
@@ -99,15 +100,27 @@ class DatabaseAnalyzer:
                 tables=self.current_config.get('tables', [])
             )
             cli.run()
-            
-            if self.table_identifier:
-                self.table_identifier.save_name_matches()
-            if self.connection_manager:
-                self.connection_manager.close()
-            self.logger.info("Application shutdown")
         except Exception as e:
             self.logger.error(f"Error running application: {e}")
             print(f"Error: {e}")
+        finally:
+            self._cleanup()
+
+    def _cleanup(self):
+        """Clean up resources on shutdown."""
+        try:
+            if self.table_identifier:
+                self.table_identifier.save_name_matches()
+                self.logger.debug("Saved name matches")
+            if self.cache_synchronizer:
+                self.cache_synchronizer.close()
+                self.logger.debug("Closed cache synchronizer")
+            if self.connection_manager:
+                self.connection_manager.close()
+                self.logger.debug("Closed database connection")
+            self.logger.info("Application shutdown")
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {e}")
 
     def load_configs(self, config_path: str = "app-config/database_configurations.json") -> List[Dict]:
         try:
@@ -116,7 +129,6 @@ class DatabaseAnalyzer:
                 config_path = input("Enter config file path: ").strip()
             configs = self.config_manager.load_configs(config_path)
             for config in configs:
-                # Validate schemas and tables
                 config['schemas'] = config.get('schemas', [])
                 config['tables'] = config.get('tables', [])
                 if not isinstance(config['schemas'], list):
@@ -178,6 +190,7 @@ class DatabaseAnalyzer:
                 self.schema_dict = self.schema_manager.load_from_cache()
             
             self.cache_synchronizer = CacheSynchronizer(db_name)
+            # Removed ModelSingleton().ensure_model() as model is already initialized
             self.pattern_manager = PatternManager(self.schema_dict, self.current_config.get('schemas', []), self.current_config.get('tables', []))
             self.feedback_manager = FeedbackManager(db_name, self.cache_synchronizer)
             self.nlp_pipeline = NLPPipeline(self.pattern_manager, db_name)
@@ -195,7 +208,8 @@ class DatabaseAnalyzer:
                 self.table_identifier,
                 self.name_matcher,
                 self.pattern_manager,
-                db_name
+                db_name,
+                self.cache_synchronizer
             )
             self.logger.debug("Managers initialized successfully")
         except Exception as e:
@@ -228,7 +242,8 @@ class DatabaseAnalyzer:
                 self.table_identifier,
                 self.name_matcher,
                 self.pattern_manager,
-                self.current_config['database']
+                self.current_config['database'],
+                self.cache_synchronizer
             )
             self.cache_synchronizer.reload_caches(self.schema_manager, self.feedback_manager, self.name_matcher)
             self.logger.info("Configurations reloaded")
@@ -362,4 +377,4 @@ if __name__ == "__main__":
 #     analyzer.run()
     
 # if __name__ == "__main__":
-#     cProfile.run("main()", "profile.out")    
+#     cProfile.run("main()", "profile.out")

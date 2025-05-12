@@ -1,5 +1,5 @@
 # config/metadata_initializer.py: Initializes metadata caches for TableIdentifier-v2.1
-# Enhanced with single-table processing and weight existence checks
+# Fixed hanging issue by lowering feedback clear threshold and deferring spacy loading
 
 import os
 import json
@@ -19,9 +19,19 @@ import sys
 import time
 
 class MetadataInitializer:
-    """Initializes metadata caches for TableIdentifier-v2.1 first launch."""
+    """
+    Initializes metadata caches for TableIdentifier-v2.1 first launch.
+    """
     
     def __init__(self, db_name: str, schema_manager: SchemaManager, connection_manager: DatabaseConnection):
+        """
+        Initialize MetadataInitializer with database name and managers.
+        
+        Args:
+            db_name: Name of the database (e.g., BikeStores).
+            schema_manager: SchemaManager instance.
+            connection_manager: DatabaseConnection instance.
+        """
         os.makedirs("logs", exist_ok=True)
         
         logging_config_path = "app-config/logging_config.ini"
@@ -54,11 +64,7 @@ class MetadataInitializer:
         self.schema_manager = schema_manager
         self.connection_manager = connection_manager
         self.model = ModelSingleton().model
-        try:
-            self.nlp = spacy.load("en_core_web_sm")
-        except Exception as e:
-            self.logger.error(f"Failed to load spacy model: {e}")
-            raise RuntimeError(f"Spacy model 'en_core_web_sm' not found. Run 'python -m spacy download en_core_web_sm'")
+        self.nlp = None  # Defer spacy loading to initialize
         self.cache_synchronizer = CacheSynchronizer(db_name)
         self.schema_cache_dir = os.path.join("schema_cache", db_name)
         self.feedback_cache_dir = os.path.join("feedback_cache", db_name)
@@ -71,30 +77,52 @@ class MetadataInitializer:
         
         # Set up signal handler for Ctrl+C
         signal.signal(signal.SIGINT, self._signal_handler)
-        
-        # Deduplicate feedback to reduce cache size
-        self.logger.info("Deduplicating feedback cache")
-        removed = self.cache_synchronizer.deduplicate_feedback()
-        self.logger.debug(f"Removed {removed} duplicate feedback entries")
-        
-        # Log feedback count
-        feedback_count = self.cache_synchronizer.count_feedback()
-        self.logger.debug(f"Feedback table contains {feedback_count} entries")
 
     def _signal_handler(self, sig, frame):
-        """Handle SIGINT (Ctrl+C) to gracefully exit."""
+        """
+        Handle SIGINT (Ctrl+C) to gracefully exit.
+        """
         self.logger.info("Received SIGINT, closing connections and exiting")
         self.cache_synchronizer.close()
         self.connection_manager.close()
         sys.exit(0)
 
     def initialize(self) -> bool:
+        """
+        Initialize metadata by building schema, weights, name matches, and feedback.
+        
+        Returns:
+            True if initialization succeeds, False otherwise.
+        """
         try:
             self.logger.info("Checking metadata caches")
             
             if not self.connection_manager.is_connected():
                 self.logger.error("No active database connection")
                 return False
+            
+            # Check feedback table size before deduplication
+            feedback_count = self.cache_synchronizer.count_feedback()
+            self.logger.debug(f"Feedback table contains {feedback_count} entries")
+            if feedback_count > 200:
+                self.logger.warning(f"Large feedback table ({feedback_count} entries), clearing to prevent deduplication issues")
+                self.cache_synchronizer.execute_with_retry("DELETE FROM feedback")
+                self.logger.info("Cleared feedback table due to excessive size")
+                feedback_count = 0
+            
+            # Deduplicate feedback with timeout
+            if feedback_count > 0:
+                self.logger.info("Deduplicating feedback cache")
+                removed_count = self.cache_synchronizer.deduplicate_feedback(timeout=60.0)
+                self.logger.info(f"Deduplication removed {removed_count} duplicate entries")
+            
+            # Load spacy model after deduplication
+            self.logger.debug("Loading spacy model en_core_web_sm")
+            try:
+                self.nlp = spacy.load("en_core_web_sm")
+            except Exception as e:
+                self.logger.error(f"Failed to load spacy model: {e}")
+                raise RuntimeError(f"Spacy model 'en_core_web_sm' not found. Run 'python -m spacy download en_core_web_sm'")
             
             self.logger.info("Building schema cache")
             schema_dict = self._build_schema_cache()
@@ -149,11 +177,17 @@ class MetadataInitializer:
             
             self.logger.info("Metadata initialization successful")
             return True
+        except TimeoutError as e:
+            self.logger.error(f"Metadata initialization timed out: {e}")
+            return False
         except Exception as e:
             self.logger.error(f"Metadata initialization failed: {e}")
             return False
 
     def _build_schema_cache(self) -> Dict:
+        """
+        Build and save schema dictionary.
+        """
         try:
             schema_dict = self.schema_manager.build_schema_dictionary(self.connection_manager.connection)
             if not schema_dict or 'tables' not in schema_dict:
@@ -167,7 +201,10 @@ class MetadataInitializer:
             self.logger.error(f"Error building schema cache: {e}")
             return {}
 
-    def _build_weights(self, schema_dict: Dict, batch_size: int = 1) -> Dict[str, Dict[str, float]]:
+    def _build_weights(self, schema_dict: Dict, batch_size: int = 10) -> Dict[str, Dict[str, float]]:
+        """
+        Build weights for tables and columns.
+        """
         try:
             weights = {}
             existing_weights = self.cache_synchronizer.load_weights()
@@ -196,9 +233,8 @@ class MetadataInitializer:
                     for fk in schema_dict['foreign_keys'][schema][table]:
                         weights[table_full][fk['column'].lower()] = 0.08
                 
-                self.cache_synchronizer.write_weights({table_full: weights[table_full]}, batch_size=10)
+                self.cache_synchronizer.write_weights({table_full: weights[table_full]}, batch_size=batch_size)
                 self.logger.debug(f"Saved weights for {table_full}")
-                time.sleep(0.01)
             
             return weights
         except Exception as e:
@@ -206,6 +242,9 @@ class MetadataInitializer:
             return {}
 
     def _build_default_name_matches(self, schema_dict: Dict) -> Dict[str, List[str]]:
+        """
+        Build default name matches for columns.
+        """
         try:
             matches = {}
             for schema in schema_dict['tables']:
@@ -250,6 +289,9 @@ class MetadataInitializer:
             return {}
 
     def _generate_query_synonyms(self, schema_dict: Dict) -> Dict:
+        """
+        Generate query synonyms for tables and columns.
+        """
         try:
             queries = []
             synonyms = {}
@@ -315,7 +357,10 @@ class MetadataInitializer:
             self.logger.error(f"Error generating query synonyms: {e}")
             return {"example_queries": [], "synonyms": {}}
 
-    def _build_synthetic_feedback(self, schema_dict: Dict, batch_size: int = 50) -> bool:
+    def _build_synthetic_feedback(self, schema_dict: Dict, batch_size: int = 10) -> bool:
+        """
+        Build synthetic feedback for tables and columns.
+        """
         try:
             all_queries = []
             for schema in schema_dict['tables']:
@@ -363,8 +408,6 @@ class MetadataInitializer:
                     except Exception as e:
                         self.logger.error(f"Error creating feedback for query '{query}': {e}")
                         continue
-                
-                time.sleep(0.01)
             
             return True
         except Exception as e:
@@ -372,6 +415,9 @@ class MetadataInitializer:
             return False
 
     def _find_related_tables(self, schema_dict: Dict, schema: str, table: str) -> List[str]:
+        """
+        Find tables related to the given table via foreign keys.
+        """
         try:
             related = []
             foreign_keys = schema_dict['foreign_keys'].get(schema, {}).get(table, [])
@@ -385,6 +431,9 @@ class MetadataInitializer:
             return []
 
     def _initialize_ignored_queries(self) -> bool:
+        """
+        Initialize default ignored queries.
+        """
         try:
             default_ignored = [
                 {"query": "chitti emchestunnav", "reason": "non-English"},
@@ -409,6 +458,9 @@ class MetadataInitializer:
             return False
 
     def _migrate_file_caches(self) -> bool:
+        """
+        Migrate legacy file-based caches to SQLite.
+        """
         try:
             if os.path.exists(self.query_synonyms_file):
                 try:
