@@ -1,320 +1,476 @@
-# Table Identification Agent (TIA)
+# Table Identifier Agent
 
-The **Table Identification Agent (TIA)** is a Python-based command-line interface (CLI) application designed to analyze natural language queries and identify relevant database tables or entities across various database systems. It supports relational databases (e.g., Microsoft SQL Server, MY SQL,etc.,), NoSQL databases, Data Warehouses, Data Lakes, and other database applications. TIA leverages natural language processing (NLP), semantic similarity, regex patterns, and user feedback to map queries to schema elements, enhancing database interaction for developers and analysts.
+## Overview
+The **Table Identifier Agent** is a Python-based application designed to analyze database schemas and process natural language queries to identify relevant tables in a relational database. It leverages natural language processing (NLP), machine learning (ML), and database metadata to map user queries to database tables, making it valuable for data analysts, database administrators, and developers who need to explore or query complex databases without deep SQL knowledge.
 
-## Table of Contents
-- [Features](#features)
-- [Architecture](#architecture)
-  - [Core Modules](#core-modules)
-  - [Supporting Modules](#supporting-modules)
-  - [Data Flow](#data-flow)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Configuration](#configuration)
-- [Logging](#logging)
-- [Contributing](#contributing)
-- [License](#license)
+The application is built to be modular, extensible, and configurable, supporting various database systems (e.g., SQL Server) and providing features like schema caching, feedback-driven learning, and synonym generation. It includes an interactive command-line interface (CLI) for user interaction and supports performance profiling for optimization.
+
+This document provides an overview of the application's architecture, details its modules and components, explains the data flow, and offers guidance for developers to contribute to the project.
 
 ## Features
-- **Natural Language Query Processing**: Maps queries (e.g., "Show me product stock availability at all stores") to database tables or entities using NLP, pattern matching, and semantic analysis.
-- **Schema-Agnostic Design**: Supports relational databases, NoSQL, Data Warehouses, and Data Lakes by dynamically adapting to provided schema metadata.
-- **Feedback System**: Allows users to confirm or correct suggestions, storing feedback to refine future predictions.
-- **Cache Management**: Persists weights, name matches, feedback, and ignored queries in a SQLite database for performance optimization.
-- **Query Validation**: Ensures queries are relevant, in English, and meet minimum length requirements (>=3 characters).
-- **Synonym Expansion**: Enhances query matching using a configurable synonym file (`query_synonyms.json`).
-- **Logging**: Detailed logs (`tia_app.log`) for debugging and monitoring query processing.
+- **Natural Language Query Processing**: Converts user queries (e.g., "total sales amount at storename=Baldwin Bikes") into relevant database tables (e.g., `sales.orders`, `sales.stores`).
+- **Schema Analysis**: Extracts and caches database schema metadata (tables, columns, relationships).
+- **Feedback Learning**: Stores user feedback to improve table identification accuracy over time.
+- **Synonym Generation**: Dynamically generates synonyms for column names and queries to enhance query matching.
+- **Interactive CLI**: Provides a user-friendly interface to process queries, view schemas, manage feedback, and generate DDL statements.
+- **Extensibility**: Supports multiple database configurations and modular components for easy customization.
+- **Performance Profiling**: Includes optional `cProfile` support to identify bottlenecks.
 
 ## Architecture
-TIA’s modular architecture separates concerns into **Core Modules** (handling primary query processing and user interaction) and **Supporting Modules** (providing utilities like caching, schema management, and NLP). Built with Python 3.8+, TIA integrates libraries such as `spacy`, `sentence-transformers`, `langdetect`, and `sqlite3` to support diverse database environments.
+The Table Identifier Agent follows a modular architecture with loosely coupled components that interact through well-defined interfaces. The application is divided into layers: **Configuration**, **Core Processing**, **Data Management**, **Analysis**, **NLP**, and **User Interface**. Each layer contains specific modules that handle distinct responsibilities, ensuring maintainability and scalability.
 
-### High-Level Architecture Diagram
+### High-Level Architecture
 ```
-+-------------------+       +-------------------+       +-------------------+
-| User (CLI)        |<----->| DatabaseAnalyzerCLI|<----->| Database (SQL,    |
-| (interface.py)    |       | (interface.py)    |       | NoSQL, DW, DL)    |
-+-------------------+       +-------------------+       +-------------------+
-                                   |
-                                   v
-+-------------------+       +-------------------+       +-------------------+
-| TableIdentifier   |<----->| CacheSynchronizer |<----->| SQLite Cache      |
-| (table_identifier)|       | (cache_synchronizer)|     | (cache.db)        |
-+-------------------+       +-------------------+       +-------------------+
-                                   |
-                                   v
-+-------------------+       +-------------------+
-| NameMatchManager  |<----->| FeedbackManager   |
-| (name_match_manager)|     | (manager.py)      |
-+-------------------+       +-------------------+
-                                   |
-                                   v
-+-------------------+       +-------------------+
-| PatternManager    |       | SchemaManager     |
-| (patterns.py)     |       | (manager.py)      |
-+-------------------+       +-------------------+
++-------------------+
+|   User Interface  |  (CLI: DatabaseAnalyzerCLI)
+|   (main.py, cli/) |
++-------------------+
+          |
+          v
++-------------------+
+| Core Processing   |  (DatabaseAnalyzer, QueryProcessor)
+|   (main.py, nlp/) |
++-------------------+
+          |
+          v
++-------------------+
+|    Analysis       |  (TableIdentifier, NameMatchManager, NLPPipeline)
+| (analysis/)       |
++-------------------+
+          |
+          v
++-------------------+
+|  Data Management  |  (SchemaManager, FeedbackManager, CacheSynchronizer)
+| (schema/, feedback/, config/) |
++-------------------+
+          |
+          v
++-------------------+
+|   Configuration   |  (DBConfigManager, DatabaseConnection, ModelSingleton)
+|   (config/)       |
++-------------------+
+          |
+          v
++-------------------+
+| Database & Cache  |  (SQL Server, SQLite cache.db)
+| (app-config/)     |
++-------------------+
 ```
 
-### Core Modules
-These modules form the backbone of TIA’s query processing and user interaction:
+### Layers and Responsibilities
+1. **Configuration Layer** (`config/`):
+   - Manages database connections, configurations, and shared resources (e.g., ML models).
+   - Key components: `DBConfigManager`, `DatabaseConnection`, `ModelSingleton`, `MetadataInitializer`, `CacheSynchronizer`.
 
-1. **DatabaseAnalyzerCLI** (`cli/interface.py`, ~589 lines)
-   - **Functionality**:
-     - Provides a CLI for user interaction, including menu options for database connection, query mode, feedback management, schema viewing, and query history.
-     - Validates queries for length, language (English, with schema-based fallback), and schema relevance.
-     - Coordinates query expansion, table identification, and feedback collection.
-     - Manages query history and cleanup of database connections.
-   - **Key Methods**:
-     - `run()`: Displays the main menu and handles user input.
-     - `_query_mode()`: Processes natural language queries and collects feedback.
-     - `_validate_query()`: Checks query validity using `langdetect` and schema terms.
-     - `_connect_to_database()`: Establishes database connections via configuration.
+2. **Data Management Layer** (`schema/`, `feedback/`, `config/`):
+   - Handles schema extraction, feedback storage, and caching of metadata and embeddings.
+   - Key components: `SchemaManager`, `FeedbackManager`, `CacheSynchronizer`.
 
-2. **TableIdentifier** (`analysis/table_identifier.py`, ~208 lines)
-   - **Functionality**:
-     - Maps natural language queries to database tables or entities using multiple strategies:
-       - Regex pattern matching (via `PatternManager`).
-       - Semantic similarity (using `sentence-transformers` embeddings).
-       - Weight-based matching (from cached weights).
-       - Name matches (synonyms from `NameMatchManager`).
-       - Entity recognition (via `spacy` for entities like ORG, PRODUCT).
-       - Custom rules (e.g., mapping “stock” to `production.stocks` in BikeStores).
-     - Updates weights and name matches based on user feedback to improve future predictions.
-   - **Key Methods**:
-     - `identify_tables()`: Returns a list of tables and confidence score for a query.
-     - `update_weights_from_feedback()`: Adjusts table-column weights based on user input.
-     - `update_name_matches()`: Adds synonyms for columns (e.g., “stock” for “quantity”).
+3. **Analysis Layer** (`analysis/`):
+   - Performs table identification, name matching, and NLP preprocessing.
+   - Key components: `TableIdentifier`, `NameMatchManager`, `NLPPipeline`, `PatternManager`.
 
-3. **CacheSynchronizer** (`config/cache_synchronizer.py`, ~512 lines)
-   - **Functionality**:
-     - Manages a SQLite database (`cache.db`) for persistent storage of:
-       - `weights`: Table-column weights for ranking relevance.
-       - `name_matches`: Column-synonym mappings (e.g., “quantity” → “stock”).
-       - `feedback`: User-confirmed query-table mappings.
-       - `ignored_queries`: Queries rejected as invalid or irrelevant.
-     - Converts NLP embeddings (`np.ndarray`) to/from SQLite BLOBs for similarity-based retrieval.
-     - Supports cache validation, clearing, and migration from file-based caches.
-   - **Key Methods**:
-     - `write_ignored_query()`: Stores rejected queries with reasons.
-     - `write_feedback()`: Saves user feedback with query embeddings.
-     - `load_weights()`: Retrieves weights for table identification.
-     - `load_name_matches()`: Loads synonym mappings.
+4. **Core Processing Layer** (`main.py`, `nlp/`):
+   - Orchestrates query processing and application flow.
+   - Key components: `DatabaseAnalyzer`, `QueryProcessor`.
 
-### Supporting Modules
-These modules provide utilities and enhance the core functionality:
+5. **User Interface Layer** (`cli/`, `main.py`):
+   - Provides an interactive CLI for user input and output.
+   - Key component: `DatabaseAnalyzerCLI`.
 
-1. **NameMatchManager** (`analysis/name_match_manager.py`, ~225 lines)
-   - **Functionality**:
-     - Scores query tokens against schema columns using cosine similarity of embeddings.
-     - Supports synonym-based matching by leveraging `name_matches` from `CacheSynchronizer`.
-     - Generates column scores (e.g., `schema.table.column: score`) to guide table identification.
-   - **Key Methods**:
-     - `process_query()`: Computes similarity scores for query tokens and columns.
+## Modules and Components
+Below is a detailed explanation of each module and its components, including their purpose, key functionalities, and file locations.
 
-2. **FeedbackManager** (`feedback/manager.py`)
-   - **Functionality**:
-     - Stores and retrieves user feedback on query-table mappings.
-     - Tracks feedback counts to prioritize frequently confirmed mappings.
-     - Provides top queries for example suggestions in the CLI.
-   - **Key Methods**:
-     - `store_feedback()`: Saves query-table feedback.
-     - `get_top_queries()`: Returns frequently used queries.
-     - `clear_feedback()`: Resets feedback data.
+### 1. Configuration Layer (`config/`)
+Handles setup, database connections, and shared resources.
 
-3. **PatternManager** (`config/patterns.py`)
-   - **Functionality**:
-     - Defines regex patterns for table matching (e.g., `\bproducts\b` → `production.products` in BikeStores).
-     - Allows dynamic pattern updates based on schema metadata.
-   - **Key Methods**:
-     - `get_patterns()`: Returns a dictionary of patterns to tables.
+- **DBConfigManager** (`config/manager.py`):
+  - **Purpose**: Loads and validates database configurations from `app-config/database_configurations.json`.
+  - **Functionality**:
+    - Reads JSON configuration (e.g., database name, driver, server, schemas, tables).
+    - Validates schema and table formats (e.g., `schema.table`).
+    - Provides configuration options for multiple databases.
+  - **Key Methods**:
+    - `load_configs(config_path)`: Loads and validates configurations.
+  - **Dependencies**: Python `json`, `os`.
 
-4. **SchemaManager** (`schema/manager.py`)
-   - **Functionality**:
-     - Builds schema dictionaries from database metadata, including tables, columns, primary keys, and foreign keys.
-     - Supports relational and non-relational schemas by abstracting metadata extraction.
-   - **Key Methods**:
-     - `build_schema_dictionary()`: Creates a schema dictionary for use by other modules.
+- **DatabaseConnection** (`config/manager.py`):
+  - **Purpose**: Manages connections to the target database (e.g., SQL Server).
+  - **Functionality**:
+    - Establishes connections using `pyodbc`.
+    - Supports ODBC drivers (e.g., `ODBC Driver 17 for SQL Server`).
+    - Provides methods to check connection status and close connections.
+  - **Key Methods**:
+    - `connect(config)`: Connects to the database using config parameters.
+    - `is_connected()`: Checks if the connection is active.
+    - `close()`: Closes the connection.
+  - **Dependencies**: `pyodbc`.
 
-5. **ModelSingleton** (`config/model_singleton.py`)
-   - **Functionality**:
-     - Manages a single instance of the `sentence-transformers` model for embedding generation.
-     - Ensures efficient memory usage across modules.
-   - **Key Methods**:
-     - Initializes and provides access to the NLP model.
+- **ModelSingleton** (`config/model_singleton.py`):
+  - **Purpose**: Manages a single instance of the `SentenceTransformer` model (`all-MiniLM-L6-v2`) for embedding generation.
+  - **Functionality**:
+    - Implements the singleton pattern to ensure one model instance.
+    - Loads the model on initialization, supporting CUDA if available.
+    - Provides access to the model for encoding queries and column names.
+  - **Key Methods**:
+    - `__new__()`: Enforces singleton behavior.
+    - `_initialize()`: Loads the model and sets up logging.
+  - **Dependencies**: `sentence_transformers`, `torch`, `logging`.
 
-6. **DatabaseConnection** (`config/manager.py`)
-   - **Functionality**:
-     - Handles database connections for relational (e.g., SQL Server) and other database types.
-     - Supports connection string-based authentication and disconnection.
-   - **Key Methods**:
-     - `connect()`: Establishes a database connection.
-     - `disconnect()`: Closes the connection.
+- **MetadataInitializer** (`config/metadata_initializer.py`):
+  - **Purpose**: Initializes metadata caches (schema, weights, name matches, synonyms, feedback).
+  - **Functionality**:
+    - Builds and caches schema metadata from the database.
+    - Generates initial weights for tables and columns.
+    - Creates default name matches and query synonyms using NLP.
+    - Manages feedback deduplication and migration of file-based caches (e.g., `query_synonyms.json`).
+  - **Key Methods**:
+    - `initialize()`: Orchestrates metadata initialization.
+    - `_build_schema_cache()`: Extracts schema metadata.
+    - `_build_weights()`: Assigns initial weights to tables/columns.
+    - `_build_default_name_matches()`: Generates column synonyms.
+    - `_generate_query_synonyms()`: Creates query-based synonyms.
+    - `_build_synthetic_feedback()`: Generates synthetic feedback.
+  - **Dependencies**: `spacy`, `sentence_transformers`, `sqlite3`, `json`.
 
-### Data Flow
-The data flow through TIA’s modules for processing a query (e.g., "Show me product stock availability at all stores") is as follows:
+- **CacheSynchronizer** (`config/cache_synchronizer.py`):
+  - **Purpose**: Manages the SQLite cache (`cache.db`) for storing metadata, feedback, and embeddings.
+  - **Functionality**:
+    - Creates and maintains tables (`weights`, `name_matches`, `feedback`, `ignored_queries`).
+    - Handles CRUD operations for cached data.
+    - Supports indexing for efficient queries (e.g., `idx_feedback_query`).
+    - Uses WAL mode for concurrent access.
+  - **Key Methods**:
+    - `__init__(db_name)`: Initializes the SQLite database.
+    - `write_name_matches(matches)`: Writes name match entries.
+    - `write_feedback(feedback)`: Stores feedback entries.
+    - `get_similar_feedback(query, threshold)`: Retrieves similar feedback based on embeddings.
+  - **Dependencies**: `sqlite3`, `numpy`.
 
-1. **User Input (DatabaseAnalyzerCLI)**:
-   - The user enters a query via the CLI in `interface.py`’s `_query_mode`.
-   - Example: User selects Query Mode and inputs the query.
+### 2. Data Management Layer (`schema/`, `feedback/`, `config/`)
+Manages schema metadata, feedback, and cached data.
 
-2. **Query Validation (DatabaseAnalyzerCLI)**:
-   - `interface.py`’s `_validate_query` checks:
-     - Length (>=3 characters).
-     - Language (English via `langdetect`, with fallback if schema terms like “products” are present).
-     - Relevance (contains table/column names from `SchemaManager`’s schema dictionary).
-     - Not in `ignored_queries` (checked via `CacheSynchronizer`).
-   - If invalid, the query is rejected and stored in `CacheSynchronizer`’s `ignored_queries` table with a reason (e.g., “non_english_lang_id”).
+- **SchemaManager** (`schema/manager.py`):
+  - **Purpose**: Extracts and caches database schema metadata.
+  - **Functionality**:
+    - Queries the database for schemas, tables, columns, and relationships.
+    - Caches schema data in `schema_cache/<db_name>/schema.json`.
+    - Validates schema and table names.
+    - Supports schema refreshes when metadata changes.
+  - **Key Methods**:
+    - `build_data_dict(connection)`: Builds the schema dictionary.
+    - `load_from_cache()`: Loads cached schema.
+    - `needs_refresh(connection)`: Checks if schema needs updating.
+    - `get_table_metadata(schema, table)`: Retrieves metadata for a table.
+  - **Dependencies**: `pyodbc`, `json`.
 
-3. **Query Expansion (DatabaseAnalyzerCLI)**:
-   - `interface.py`’s `_expand_query_with_synonyms` uses `query_synonyms.json` to expand terms (e.g., “stock” → “quantity”).
-   - The expanded query is passed to the next step.
+- **FeedbackManager** (`feedback/manager.py`):
+  - **Purpose**: Manages user feedback to improve table identification.
+  - **Functionality**:
+    - Stores query-table mappings with embeddings and confidence scores.
+    - Updates feedback counts for repeated queries.
+    - Supports clearing feedback for reset scenarios.
+  - **Key Methods**:
+    - `store_feedback(query, tables, schema_dict)`: Saves feedback with embeddings.
+    - `clear_feedback()`: Deletes all feedback entries.
+    - `get_feedback()`: Retrieves feedback entries.
+  - **Dependencies**: `CacheSynchronizer`, `sentence_transformers`.
 
-4. **Column Scoring (NameMatchManager)**:
-   - `name_match_manager.py`’s `process_query`:
-     - Tokenizes the query (e.g., “product”, “stock”, “availability”, “stores”).
-     - Computes cosine similarity between tokens and schema columns using `sentence-transformers` embeddings (via `ModelSingleton`).
-     - Retrieves synonyms from `CacheSynchronizer`’s `name_matches` table.
-     - Returns a dictionary of column scores (e.g., `production.stocks.quantity: 0.8`).
+### 3. Analysis Layer (`analysis/`)
+Performs table identification, name matching, and query preprocessing.
 
-5. **Table Identification (TableIdentifier)**:
-   - `table_identifier.py`’s `identify_tables` processes the query and column scores:
-     - Applies regex patterns from `PatternManager` (e.g., `\bstores\b` → `sales.stores`).
-     - Computes semantic similarity between the query and table names using `sentence-transformers`.
-     - Uses weights and name matches from `CacheSynchronizer`’s `weights` and `name_matches` tables.
-     - Performs entity recognition with `spacy` to detect entities (e.g., “stores” as ORG).
-     - Applies custom rules (e.g., “stock” → `production.stocks` for BikeStores).
-   - Outputs a list of tables (e.g., `['production.stocks', 'production.products', 'sales.stores']`) and a confidence score.
+- **TableIdentifier** (`analysis/table_identifier.py`):
+  - **Purpose**: Identifies relevant tables for a given query.
+  - **Functionality**:
+    - Combines feedback, semantic similarity, synonyms, and name matches to score tables.
+    - Validates identified tables against the schema.
+    - Updates weights based on feedback.
+  - **Key Methods**:
+    - `process_query(query)`: Returns a list of tables and confidence score.
+    - `update_weights_from_feedback(query, tables)`: Adjusts table weights.
+    - `save_name_matches()`: Saves dynamic name matches.
+  - **Dependencies**: `FeedbackManager`, `NameMatchManager`, `PatternManager`, `CacheSynchronizer`.
 
-6. **User Feedback (DatabaseAnalyzerCLI, FeedbackManager)**:
-   - `interface.py` displays the identified tables and prompts for confirmation (‘y’/’n’).
-   - If confirmed (‘y’):
-     - `FeedbackManager.store_feedback` saves the query-tables mapping to `CacheSynchronizer`’s `feedback` table.
-     - `TableIdentifier.update_weights_from_feedback` increments weights in `CacheSynchronizer`’s `weights` table.
-     - `TableIdentifier.save_name_matches` updates synonyms in `CacheSynchronizer`’s `name_matches` table.
-   - If rejected (‘n’):
-     - User provides correct tables (e.g., `production.stocks,production.products,sales.stores`) or skips.
-     - Correct tables are validated (`TableIdentifier.validate_tables`) and saved via `FeedbackManager`.
-     - The original query may be added to `CacheSynchronizer`’s `ignored_queries` with a reason (e.g., “user_rejected”).
+- **NameMatchManager** (`analysis/name_match_manager.py`):
+  - **Purpose**: Generates and manages column name synonyms for query matching.
+  - **Functionality**:
+    - Computes similarity between query tokens and column names using embeddings.
+    - Caches synonyms in `name_matches` table.
+    - Supports dynamic synonym generation during query processing.
+  - **Key Methods**:
+    - `generate_matches(query_tokens)`: Creates synonyms for query tokens.
+    - `save_dynamic_matches(matches)`: Saves new matches to cache.
+  - **Dependencies**: `CacheSynchronizer`, `sentence_transformers`.
 
-7. **Cache Persistence (CacheSynchronizer)**:
-   - `CacheSynchronizer` updates `cache.db` with:
-     - Updated weights (`weights` table).
-     - New or modified synonyms (`name_matches` table).
-     - Feedback entries (`feedback` table).
-     - Ignored queries (`ignored_queries` table).
-   - Embeddings are stored as BLOBs for similarity-based retrieval in future queries.
+- **NLPPipeline** (`analysis/processor.py`):
+  - **Purpose**: Preprocesses queries for analysis.
+  - **Functionality**:
+    - Tokenizes queries using `spacy`.
+    - Removes stop words and normalizes tokens.
+    - Extracts key terms for matching.
+  - **Key Methods**:
+    - `preprocess_query(query)`: Returns preprocessed tokens.
+  - **Dependencies**: `spacy`.
 
-8. **Output and Logging (DatabaseAnalyzerCLI)**:
-   - The user sees the identified tables, confidence score, and feedback prompt.
-   - Logs are written to `logs/tia_app.log` with details like “Schema match: table 'products' in query” or “Identified tables: [...]”.
+- **PatternManager** (`config/patterns.py`):
+  - **Purpose**: Manages patterns for query and schema matching.
+  - **Functionality**:
+    - Defines patterns for identifying entities (e.g., column names, table names) in queries.
+    - Supports schema-specific patterns for filtering tables.
+  - **Key Methods**:
+    - `match_patterns(query, schema_dict)`: Matches query tokens to schema elements.
+  - **Dependencies**: `SchemaManager`.
 
-## Installation
+### 4. Core Processing Layer (`main.py`, `nlp/`)
+Orchestrates the application flow and query processing.
+
+- **DatabaseAnalyzer** (`main.py`):
+  - **Purpose**: Main application controller.
+  - **Functionality**:
+    - Initializes all components and managers.
+    - Handles configuration selection and database connection.
+    - Processes queries and delegates to `QueryProcessor`.
+    - Provides methods for schema validation, DDL generation, and feedback management.
+    - Launches the CLI (`DatabaseAnalyzerCLI`).
+  - **Key Methods**:
+    - `run()`: Starts the application and CLI.
+    - `connect_to_database()`: Establishes database connection.
+    - `_initialize_managers()`: Initializes all managers.
+    - `process_query(query)`: Processes a natural language query.
+    - `generate_ddl(tables)`: Generates DDL for specified tables.
+    - `validate_tables_exist(tables)`: Validates table names.
+  - **Dependencies**: All other modules.
+
+- **QueryProcessor** (`nlp/QueryProcessor.py`):
+  - **Purpose**: Processes natural language queries to identify tables.
+  - **Functionality**:
+    - Coordinates preprocessing (`NLPPipeline`), table identification (`TableIdentifier`), and name matching (`NameMatchManager`).
+    - Returns a list of tables and a confidence score.
+  - **Key Methods**:
+    - `process_query(query)`: Processes a query and returns tables and confidence.
+  - **Dependencies**: `NLPPipeline`, `TableIdentifier`, `NameMatchManager`, `PatternManager`, `CacheSynchronizer`.
+
+### 5. User Interface Layer (`cli/`)
+Provides an interactive interface for users.
+
+- **DatabaseAnalyzerCLI** (`cli/interface.py`):
+  - **Purpose**: Implements the command-line interface.
+  - **Functionality**:
+    - Displays a menu for query processing, schema viewing, feedback management, and DDL generation.
+    - Handles user input and displays results.
+    - Supports commands like "back" and exit.
+  - **Key Methods**:
+    - `run()`: Starts the CLI loop.
+    - `display_menu()`: Shows available options.
+  - **Dependencies**: `DatabaseAnalyzer`, `FeedbackManager`, `SchemaManager`.
+
+## Data Flow
+The data flow describes how information moves through the components during key operations, such as application startup, query processing, and feedback storage.
+
+### 1. Application Startup
+1. **User Input** (`DatabaseAnalyzerCLI`):
+   - User runs `main.py`, which instantiates `DatabaseAnalyzer`.
+   - `DatabaseAnalyzer.run()` prompts for configuration selection (e.g., `BikeStores`).
+2. **Configuration Loading** (`DBConfigManager`):
+   - Loads `database_configurations.json` and validates schemas/tables.
+   - Sets the selected configuration in `DatabaseAnalyzer.current_config`.
+3. **Database Connection** (`DatabaseConnection`):
+   - Connects to the database using `pyodbc` and config parameters.
+4. **Manager Initialization** (`DatabaseAnalyzer._initialize_managers`):
+   - Initializes `SchemaManager` to extract or load schema.
+   - Runs `MetadataInitializer` to build caches (schema, weights, name matches, synonyms).
+   - Initializes `CacheSynchronizer` to create `cache.db`.
+   - Sets up `ModelSingleton` for the `SentenceTransformer` model.
+   - Initializes `PatternManager`, `FeedbackManager`, `NLPPipeline`, `NameMatchManager`, `TableIdentifier`, and `QueryProcessor`.
+5. **CLI Launch** (`DatabaseAnalyzerCLI`):
+   - Starts the CLI loop, ready for user queries.
+
+### 2. Query Processing
+1. **User Query** (`DatabaseAnalyzerCLI`):
+   - User enters a query (e.g., "how much staff works for all stores").
+   - CLI passes the query to `DatabaseAnalyzer.process_query`.
+2. **Preprocessing** (`QueryProcessor`, `NLPPipeline`):
+   - `QueryProcessor` delegates to `NLPPipeline` to tokenize and normalize the query (e.g., `staff work store`).
+3. **Table Identification** (`TableIdentifier`):
+   - `TableIdentifier` retrieves feedback from `FeedbackManager` via `CacheSynchronizer`.
+   - Matches query tokens to columns using `NameMatchManager` and synonyms.
+   - Uses `PatternManager` to apply schema-specific patterns.
+   - Combines feedback, semantic similarity (via `ModelSingleton`), and name matches to score tables.
+   - Validates tables against `SchemaManager`.
+   - Returns tables (e.g., `sales.staffs`, `sales.stores`) and confidence (e.g., 0.95).
+4. **Result Display** (`DatabaseAnalyzerCLI`):
+   - CLI displays the tables and confidence to the user.
+
+### 3. Feedback Storage
+1. **User Confirmation** (`DatabaseAnalyzerCLI`):
+   - User confirms or modifies the identified tables.
+   - CLI calls `DatabaseAnalyzer.confirm_tables` or `update_feedback`.
+2. **Feedback Storage** (`FeedbackManager`):
+   - `FeedbackManager` generates an embedding for the query using `ModelSingleton`.
+   - Stores the query, tables, embedding, and count in `cache.db` via `CacheSynchronizer`.
+3. **Weight Update** (`TableIdentifier`):
+   - Updates table weights based on feedback to improve future identifications.
+4. **Synonym Update** (`NameMatchManager`):
+   - Caches new synonyms (e.g., `staff` for `staff_id`) in `name_matches`.
+
+### 4. Shutdown
+1. **User Exit** (`DatabaseAnalyzerCLI`):
+   - User selects the exit option (e.g., option 9).
+2. **Resource Cleanup** (`DatabaseAnalyzer._cleanup`):
+   - `TableIdentifier` saves name matches.
+   - `CacheSynchronizer` closes SQLite connections.
+   - `DatabaseConnection` closes the database connection.
+
+### Data Flow Diagram
+```
+User Query -> DatabaseAnalyzerCLI -> DatabaseAnalyzer -> QueryProcessor
+   |                                                  |
+   v                                                  v
+NLPPipeline                                         TableIdentifier
+   |                                                  |
+   v                                                  v
+PatternManager                                  FeedbackManager
+   |                                                  |
+   v                                                  v
+SchemaManager                                    CacheSynchronizer
+   |                                                  |
+   v                                                  v
+DatabaseConnection                               ModelSingleton
+   |                                                  |
+   v                                                  v
+SQL Server Database                             SQLite cache.db
+```
+
+## Developer Guide
+To collaborate on the Table Identifier Agent, follow these steps to set up, understand, and contribute to the project.
+
 ### Prerequisites
-- Python 3.8+
-- Database access (e.g., Microsoft SQL Server for BikeStores, MongoDB for NoSQL, or Data Warehouse/Data Lake systems).
-- SQLite (included with Python).
-
-### Dependencies
-Install required Python packages:
-```bash
-pip install spacy sentence-transformers torch pyodbc numpy langdetect
-python -m spacy download en_core_web_sm
-```
+- **Python**: 3.8+.
+- **Dependencies**:
+  ```bash
+  pip install sentence-transformers numpy sqlite3 pyodbc spacy
+  python -m spacy download en_core_web_sm
+  ```
+- **Database**: SQL Server or compatible DBMS with ODBC driver (e.g., `ODBC Driver 17 for SQL Server`).
+- **Git**: To clone the repository.
 
 ### Setup
-1. Clone the repository:
+1. **Clone the Repository**:
    ```bash
    git clone https://github.com/m-prasad-reddy/TIA-1.1.git
-   cd TableIdentifier-v2
+   cd TIA-1.1
    ```
-
-2. Configure the database:
-   - Update `app-config/database_configurations.json` with your database connection details. Example for BikeStores (SQL Server):
+2. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. **Configure Database**:
+   - Update `app-config/database_configurations.json` with your database details:
      ```json
      [
-         {
-             "name": "BIKES_DB",
-             "connection_string": "DRIVER={SQL Server};SERVER=your_server;DATABASE=BikeStores;Trusted_Connection=yes;"
-         }
+       {
+         "name": "BikeStores",
+         "driver": "ODBC Driver 17 for SQL Server",
+         "server": "localhost",
+         "database": "BikeStores",
+         "schemas": ["hr", "production", "sales"],
+         "tables": []
+       }
      ]
      ```
-   - For NoSQL, Data Warehouses, or Data Lakes, provide appropriate connection strings or API endpoints.
-
-3. (Optional) Add query synonyms:
-   - Create `app-config/<db_name>/query_synonyms.json` (e.g., `app-config/BikeStores/query_synonyms.json`):
-     ```json
-     {
-         "synonyms": {
-             "stock": ["quantity", "inventory", "availability"],
-             "availability": ["quantity", "stock"],
-             "store": ["stores", "shop"],
-             "product": ["products", "item"]
-         }
-     }
-     ```
-
-4. Ensure directories exist:
+4. **Run the Application**:
    ```bash
-   mkdir -p app-config/<db_name> logs
+   python src/main.py
    ```
 
-## Usage
-1. Run the application:
-   ```bash
-   python main.py
-   ```
+### Project Structure
+```
+TIA-1.1/
+├── app-config/                 # Configuration files and cache
+│   ├── database_configurations.json
+│   ├── logging_config.ini
+│   ├── BikeStores/            # Cache directory
+│   │   ├── cache.db
+│   │   ├── schema_cache/
+├── logs/                      # Log files
+│   ├── bikestores_app.log
+├── src/                       # Source code
+│   ├── main.py               # Main entry point
+│   ├── cli/                  # CLI module
+│   │   ├── interface.py
+│   ├── config/               # Configuration modules
+│   │   ├── manager.py
+│   │   ├── model_singleton.py
+│   │   ├── metadata_initializer.py
+│   │   ├── cache_synchronizer.py
+│   │   ├── patterns.py
+│   ├── schema/               # Schema management
+│   │   ├── manager.py
+│   ├── feedback/             # Feedback management
+│   │   ├── manager.py
+│   ├── analysis/             # Analysis modules
+│   │   ├── table_identifier.py
+│   │   ├── name_match_manager.py
+│   │   ├── processor.py
+│   ├── nlp/                  # NLP modules
+│   │   ├── QueryProcessor.py
+├── requirements.txt           # Dependencies
+```
 
-2. Select options from the CLI menu:
-   ```
-   === Table Identifier Agent ===
-   Main Menu:
-   1. Connect to Database
-   2. Query Mode
-   3. Reload Configurations
-   4. Manage Feedback
-   5. Manage Ignored Queries
-   6. View Schema
-   7. View Query History
-   8. Exit
-   ```
-
-3. Example Workflow (using BikeStores):
-   - **Connect to Database**: Select option 1, choose `BIKES_DB`.
-   - **Query Mode**: Select option 2, enter a query:
+### Contributing
+1. **Fork and Branch**:
+   - Fork the repository and create a feature branch:
+     ```bash
+     git checkout -b feature/your-feature
      ```
-     Enter query (or 'back'): Show me product stock availability at all stores
-     Identified Tables: production.stocks, production.products, sales.stores
-     Confidence: High
-     Are these tables correct? (y/n): y
+2. **Code Style**:
+   - Follow PEP 8 guidelines.
+   - Use descriptive variable names and docstrings.
+   - Add logging for debugging (`logging.debug`, `logging.info`).
+3. **Testing**:
+   - Test changes with the `BikeStores` database.
+   - Verify functionality using the CLI:
+     - Process queries (e.g., "total sales amount at storename=Baldwin Bikes").
+     - Check feedback (`SELECT * FROM feedback` in `cache.db`).
+     - Generate DDL for tables.
+   - Run with `cProfile` to profile performance:
+     ```python
+     # Uncomment cProfile code in main.py
+     python src/main.py
+     python -m pstats profile.out
      ```
-   - **View Schema**: Select option 6 to inspect schema elements (tables, columns, etc.).
-   - **Manage Feedback**: Select option 4 to list or add feedback.
-   - **Manage Ignored Queries**: Select option 5 to review rejected queries.
+4. **Logging**:
+   - Use the existing logging setup (`logging_config.ini`).
+   - Log key operations and errors to `logs/bikestores_app.log`.
+5. **Pull Request**:
+   - Submit a pull request with a clear description of changes.
+   - Include tests and log outputs demonstrating functionality.
 
-## Configuration
-- **Database Configuration**: `app-config/database_configurations.json` defines database connections (e.g., SQL Server, MongoDB).
-- **Logging**: Configured via `app-config/logging_config.ini` or defaults to `logs/tia_app.log`.
-- **Cache**: Stored in `app-config/<db_name>/cache.db` (SQLite).
-- **Synonyms**: Optional `app-config/<db_name>/query_synonyms.json` for query expansion.
+### Development Tips
+- **Debugging**:
+  - Check `logs/bikestores_app.log` for detailed execution traces.
+  - Use `sqlite3 app-config/BikeStores/cache.db` to inspect `cache.db`.
+- **Extending Features**:
+  - Add new database drivers in `DatabaseConnection`.
+  - Enhance `NLPPipeline` with additional NLP models (e.g., BERT).
+  - Implement new CLI commands in `DatabaseAnalyzerCLI`.
+- **Performance Optimization**:
+  - Reuse SQLite connections in `CacheSynchronizer`.
+  - Cache embeddings in `NameMatchManager`.
+  - Optimize feedback deduplication in `FeedbackManager`.
 
-## Logging
-- Logs are written to `logs/tia_app.log`.
-- Includes debugging info, errors, and query processing details (e.g., “Identified tables”, “Wrote ignored query”).
-- Example log entry:
-  ```
-  2025-05-01 22:00:08,874 - table_identifier - DEBUG - Identified tables: ['production.stocks', 'production.products', 'sales.stores'], confidence=0.85
-  ```
-
-## Contributing
-Contributions are welcome! To contribute:
-1. Fork the repository.
-2. Create a feature branch (`git checkout -b feature/your-feature`).
-3. Commit changes (`git commit -m "Add your feature"`).
-4. Push to the branch (`git push origin feature/your-feature`).
-5. Open a pull request.
-
-Please include:
-- Detailed description of changes.
-- Tests or examples demonstrating the feature (e.g., new database type support).
-- Updates to this README for new modules or configurations.
+### Known Issues and Improvements
+- **Feedback Clearing**: The feedback table is cleared if it exceeds 360 entries, potentially losing valuable data. Consider increasing the threshold or implementing selective deduplication.
+- **SQLite Connection Overhead**: Frequent connection creation in `CacheSynchronizer` may cause performance issues. Implement connection pooling.
+- **Name Match Redundancy**: Repeated clearing and rewriting of `name_matches` can be optimized with incremental updates.
+- **Concurrency**: SQLite write contention may occur in multi-user scenarios. Use transactions and write queues to mitigate.
 
 ## License
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See the `LICENSE` file for details.
+
+## Contact
+For questions or contributions, contact the project maintainer at [GitHub Issues](https://github.com/m-prasad-reddy/TIA-1.1/issues).
+
+---
+
+*Generated on May 12, 2025, for Table Identifier Agent-v1.1.*
