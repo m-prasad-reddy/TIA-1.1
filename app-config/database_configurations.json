@@ -6,7 +6,7 @@
 	  "schemas": ["SalesLT"],
 	  "tables" : [],
 	  "driver": "ODBC Driver 17 for SQL Server",
-      "password": "S0rry!43"
+      "password": ""
     },
     "ADWORKS2019_DB": {
       "server": "localhost",
@@ -15,7 +15,7 @@
 	  "tables" : ["dbo.AdventureWorksDWBuildVersion","dbo.DimAccount","dbo.DimCurrency"],
 	  "schemas": [],
 	  "driver": "ODBC Driver 17 for SQL Server",
-      "password": "S0rry!43"
+      "password": ""
     },
     "BIKES_DB": {
       "server": "localhost",
@@ -24,6 +24,6 @@
 	  "tables" : [],
       "username": "sa",
 	  "driver": "ODBC Driver 17 for SQL Server",
-      "password": "S0rry!43"
+      "password": ""
     }
  }
