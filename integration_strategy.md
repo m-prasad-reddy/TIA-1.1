@@ -53,7 +53,7 @@ User Query → TIA → PROGA → LLM → SQL Query → OPDEN → Data Sources
 ┌────────┼────────────────────────────────────────────────────────┐
 │        ↓                                                        │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────┐ │
-│  │  S3/Object  │  │    RDBMS    │  │    NoSQL    │  │  Cloud  │ │
+│  │  S3/Object  │  │    RDBMS    │  │    NoSQL    │  │         │ │
 │  │   Storage   │  │  Databases  │  │  Databases  │  │   DWH   │ │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────┘ │
 │                                                                 │
