@@ -31,11 +31,11 @@ User Query → TIA → PROGA → LLM → SQL Query → OPDEN → Data Sources
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Datascriber System                        │
+│                        Datascriber System                       │
 │                                                                 │
 │  ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────────────┐  │
 │  │  User   │   │   TIA   │   │  PROGA  │   │      LLM        │  │
-│  │ Interface│──→│Component│──→│Component│──→│(SQL Generation) │  │
+│  │ Interface│──→│Component│──→│Component│──→│(SQL Generation)│  │
 │  └─────────┘   └─────────┘   └─────────┘   └─────────────────┘  │
 │        ↑                                          │             │
 │        │                                          ↓             │
